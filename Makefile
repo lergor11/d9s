@@ -13,6 +13,7 @@ vet:
 
 lint: vet
 	gofmt -l . | (! grep .)
+	golangci-lint run
 
 run: build
 	./$(BINARY)

@@ -10,8 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// EngineType identifies a supported database engine.
 type EngineType string
 
+// Supported engine types, as written in the `type` field of a connection.
 const (
 	Postgres   EngineType = "postgres"
 	ClickHouse EngineType = "clickhouse"

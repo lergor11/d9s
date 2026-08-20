@@ -22,6 +22,7 @@ type Resolver struct {
 	runOp func(ctx context.Context, ref string) (string, error)
 }
 
+// NewResolver returns a resolver backed by the 1Password CLI.
 func NewResolver() *Resolver {
 	return &Resolver{cache: map[string]string{}, runOp: runOpCLI}
 }
