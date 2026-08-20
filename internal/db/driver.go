@@ -1,0 +1,72 @@
+// Package db defines the engine-agnostic driver contract and shared result
+// model. The UI depends only on this package, never on concrete engines.
+package db
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"time"
+
+	"github.com/andreim/d9s/internal/config"
+)
+
+// DialContextFunc dials a raw TCP connection to the database host. When the
+// connection is tunneled, this dials through the SSH client instead of the OS.
+type DialContextFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// Database is one selectable database inside a connection.
+type Database struct {
+	Name   string
+	Detail string // e.g. owner+size (postgres), engine (clickhouse), key count (redis)
+}
+
+// Result is the outcome of a single statement.
+type Result struct {
+	Statement string
+	Columns   []string
+	Rows      [][]string
+	Affected  int64 // -1 when not applicable
+	Err       error
+	Skipped   bool // statement not run because a previous one failed / cancelled
+	Duration  time.Duration
+}
+
+// Target identifies what to connect to: a configured connection plus resolved
+// secrets and an optional dialer that routes through an SSH tunnel.
+type Target struct {
+	Config   config.Connection
+	Password string          // already resolved; empty if none
+	Dial     DialContextFunc // nil = direct TCP
+	Database string          // selected database; empty = engine default
+}
+
+// Driver is implemented once per engine.
+type Driver interface {
+	// Connect establishes the session. Implementations must be safe to call
+	// from a non-UI goroutine.
+	Connect(ctx context.Context, t Target) error
+	// ListDatabases enumerates databases available on the connection.
+	ListDatabases(ctx context.Context) ([]Database, error)
+	// Execute runs one statement and returns its result. Err is recorded in
+	// the Result rather than returned, except for context cancellation.
+	Execute(ctx context.Context, statement string) Result
+	Close() error
+}
+
+// Factory creates a fresh driver instance for a connection.
+type Factory func() Driver
+
+var registry = map[config.EngineType]Factory{}
+
+// Register makes an engine available to the UI. Called from adapter init().
+func Register(t config.EngineType, f Factory) { registry[t] = f }
+
+// New returns a driver for the engine type.
+func New(t config.EngineType) (Driver, error) {
+	f, ok := registry[t]
+	if !ok {
+		return nil, fmt.Errorf("no driver registered for engine %q", t)
+	}
+	return f(), nil
+}
