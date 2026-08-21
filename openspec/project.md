@@ -11,7 +11,7 @@ MVP goals:
 - Execute queries/commands: a single statement or several statements in one run
 
 ## Tech Stack
-- Go 1.23+ (single static binary, cross-compiled for darwin/linux, amd64/arm64)
+- Go 1.25+ (single static binary, cross-compiled for darwin/linux, amd64/arm64)
 - TUI: `github.com/charmbracelet/bubbletea` + `bubbles` + `lipgloss`
 - PostgreSQL: `github.com/jackc/pgx/v5`
 - ClickHouse: `github.com/ClickHouse/clickhouse-go/v2`

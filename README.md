@@ -50,7 +50,7 @@ shasum -a 256 -c checksums.txt --ignore-missing
 tar xzf d9s_${VERSION}_${OS}_${ARCH}.tar.gz && sudo mv d9s /usr/local/bin/
 ```
 
-From source (Go 1.23+):
+From source (Go 1.25+):
 
 ```sh
 make build   # produces ./d9s, stamped as a development build

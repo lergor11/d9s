@@ -1,6 +1,6 @@
 module github.com/lergor11/d9s
 
-go 1.26.7
+go 1.25.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
