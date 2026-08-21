@@ -87,8 +87,8 @@ connections:
     user: app
     password: op://Infra/prod-pg/password
     ssh:
-      bastion: bastion.corp.com
-      user: deploy        # key comes from the 1Password SSH agent
+      bastion: bastion.corp.com   # or a ~/.ssh/config Host alias
+      user: deploy                # key comes from the 1Password SSH agent
   - name: analytics-ch
     type: clickhouse
     host: ch.internal
@@ -101,6 +101,11 @@ connections:
 
 `password` accepts an `op://` reference, an `${ENV_VAR}` reference, or (with a
 warning) a literal.
+
+`bastion` accepts a `~/.ssh/config` Host alias as well as a hostname: d9s asks
+`ssh -G` to resolve it, so `Hostname`, `User`, and `Port` from your ssh config
+apply, including anything pulled in by `Include` or `Match`. Values set in the
+d9s config win over the ones ssh_config supplies.
 
 ### TLS
 

@@ -149,10 +149,10 @@ func TestResolveUserDefaultsToOSUser(t *testing.T) {
 }
 
 func TestBastionAddr(t *testing.T) {
-	if got := bastionAddr(config.SSH{Bastion: "b.example.com"}); got != "b.example.com:22" {
+	if got := bastionAddr("b.example.com", 0); got != "b.example.com:22" {
 		t.Errorf("default port: got %q, want b.example.com:22", got)
 	}
-	if got := bastionAddr(config.SSH{Bastion: "b.example.com", Port: 2222}); got != "b.example.com:2222" {
+	if got := bastionAddr("b.example.com", 2222); got != "b.example.com:2222" {
 		t.Errorf("explicit port: got %q, want b.example.com:2222", got)
 	}
 }

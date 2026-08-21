@@ -3,6 +3,7 @@
 package sshtunnel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -98,16 +99,19 @@ func (t *Tunnel) connect(ctx context.Context) (*ssh.Client, error) {
 	}
 	defer func() { _ = agentConn.Close() }() // signers are only needed during the handshake
 
-	sshUser, err := resolveUser(t.cfg.User)
+	// A bastion is usually named by its ~/.ssh/config alias, so ask ssh what
+	// that resolves to. Anything set explicitly in the d9s config still wins.
+	host := lookupHost(t.cfg.Bastion)
+	sshUser, err := resolveUser(cmp.Or(t.cfg.User, host.User))
 	if err != nil {
 		return nil, err
 	}
-	hostKeyCB, err := hostKeyCallback(t.cfg.Bastion)
+	hostKeyCB, err := hostKeyCallback(host.Hostname)
 	if err != nil {
 		return nil, err
 	}
 
-	addr := bastionAddr(t.cfg)
+	addr := bastionAddr(host.Hostname, cmp.Or(t.cfg.Port, host.Port))
 	var d net.Dialer
 	tcpConn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -224,12 +228,11 @@ func resolveUser(configured string) (string, error) {
 	return u.Username, nil
 }
 
-func bastionAddr(cfg config.SSH) string {
-	port := cfg.Port
+func bastionAddr(hostname string, port int) string {
 	if port == 0 {
 		port = 22
 	}
-	return net.JoinHostPort(cfg.Bastion, strconv.Itoa(port))
+	return net.JoinHostPort(hostname, strconv.Itoa(port))
 }
 
 // hostKeyCallback verifies the bastion against ~/.ssh/known_hosts. There is
