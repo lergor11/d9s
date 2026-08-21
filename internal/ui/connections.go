@@ -8,9 +8,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lergor11/d9s/internal/config"
 	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/export"
 	"github.com/lergor11/d9s/internal/secrets"
 	"github.com/lergor11/d9s/internal/sshtunnel"
 )
@@ -53,6 +55,16 @@ func (m *model) updateConnections(msg tea.KeyMsg) tea.Cmd {
 	if m.editor != nil {
 		return m.updateEditor(msg)
 	}
+	if m.errDetail != nil {
+		switch msg.String() {
+		case "esc", "q", "enter", "v":
+			m.errDetail = nil
+		case "y":
+			text := m.errDetail.errMsg
+			return func() tea.Msg { return cellCopiedMsg{err: export.CopyText(text)} }
+		}
+		return nil
+	}
 
 	switch msg.String() {
 	case "q":
@@ -76,6 +88,12 @@ func (m *model) updateConnections(msg tea.KeyMsg) tea.Cmd {
 			m.editor = &connEditor{confirm: &editorConfirm{
 				kind: editorConfirmDelete, name: m.conns[m.selConn].cfg.Name,
 			}}
+		}
+	case "v":
+		// The row shows a clipped error, and a driver's failure text routinely
+		// runs past it; this is the only way to read the whole thing.
+		if len(m.conns) > 0 && m.conns[m.selConn].errMsg != "" {
+			m.errDetail = m.conns[m.selConn]
 		}
 	case "enter":
 		if len(m.conns) == 0 {
@@ -332,7 +350,14 @@ func (m *model) capturesKeys() bool {
 // the editor has on top of it.
 func (m *model) connectionsHints() string {
 	if m.editor == nil {
-		return "j/k move · enter connect · a add · e edit · d delete · q quit · ? help"
+		if m.errDetail != nil {
+			return "y copy · esc close"
+		}
+		hints := "j/k move · enter connect · a add · e edit · d delete · q quit · ? help"
+		if len(m.conns) > 0 && m.conns[m.selConn].errMsg != "" {
+			hints = "j/k move · enter retry · v full error · a add · e edit · d delete · q quit"
+		}
+		return hints
 	}
 	e := m.editor
 	switch {
@@ -356,6 +381,7 @@ func (m *model) connectionsHelp(write func(key, desc string)) {
 	write("a", "add a connection")
 	write("e", "edit the selected connection")
 	write("d", "delete the selected connection (asks first)")
+	write("v", "read the whole error of a failed connection")
 	write("q", "quit")
 	write("", "")
 	write("in the form:", "")
@@ -366,4 +392,17 @@ func (m *model) connectionsHelp(write func(key, desc string)) {
 	write("ctrl+p", "pick a password from 1Password")
 	write("ctrl+k", "check that the op:// reference resolves")
 	write("esc", "cancel")
+}
+
+// errDetailView shows a failed connection's whole error. Driver failures
+// routinely run past the width of a row, and the clipped version usually cuts
+// off exactly the part that says what went wrong.
+func (m *model) errDetailView(width, height int) string {
+	cs := m.errDetail
+	body := lipgloss.NewStyle().Width(max(20, width-10)).Render(cs.errMsg)
+	var b strings.Builder
+	b.WriteString(stSection.Render(cs.cfg.Name+" could not connect") + "\n\n")
+	b.WriteString(stErr.Render(body) + "\n\n")
+	b.WriteString(stDim.Render("y copy · esc close"))
+	return stModal.MaxHeight(height).Render(b.String())
 }

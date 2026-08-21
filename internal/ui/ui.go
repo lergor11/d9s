@@ -54,6 +54,10 @@ type model struct {
 	// the user is not editing a connection.
 	editor *connEditor
 
+	// errDetail is the connection whose full failure text is on screen; nil
+	// when no such overlay is open.
+	errDetail *connState
+
 	activeConn int // index into conns whose databases are listed
 	selDB      int
 	dbOpening  string // name of the database being opened; "" when idle
@@ -263,6 +267,8 @@ func (m *model) View() string {
 		body = m.overlay(m.quitConfirmView())
 	case m.showHelp:
 		body = m.overlay(m.helpView())
+	case m.view == viewConnections && m.errDetail != nil:
+		body = m.overlay(m.errDetailView(m.width, m.bodyHeight()))
 	case m.view == viewQuery && m.query.confirm != nil:
 		body = m.overlay(m.query.confirmView(m.width))
 	case m.view == viewQuery && m.query.histOpen:
