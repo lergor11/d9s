@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 // rpcResponse is as much of a JSON-RPC reply as the test needs to look at.

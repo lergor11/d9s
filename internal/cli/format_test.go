@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 func TestRenderTableAligns(t *testing.T) {

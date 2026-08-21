@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/andreim/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/secrets"
 )
 
 // redactedMarker replaces a secret wherever one is found in outgoing text.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andreim/d9s/internal/db"
-	"github.com/andreim/d9s/internal/export"
+	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/export"
 )
 
 // Format is an output encoding for a result set.

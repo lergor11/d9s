@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/db"
-	"github.com/andreim/d9s/internal/secrets"
-	"github.com/andreim/d9s/internal/sshtunnel"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/sshtunnel"
 )
 
 // Session is a connected driver together with the SSH tunnel it was reached

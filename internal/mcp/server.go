@@ -22,8 +22,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/secrets"
 )
 
 // instructions are handed to the client at initialize, so an agent that never

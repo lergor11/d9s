@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/secrets"
 )
 
 // opTimeout bounds one 1Password CLI call. It is generous because unlocking

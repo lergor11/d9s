@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 func TestTLSLabel(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 // noArgs is the argument type of a tool that takes none. The SDK infers the

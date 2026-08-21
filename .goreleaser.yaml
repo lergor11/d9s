@@ -65,14 +65,14 @@ snapshot:
 
 release:
   github:
-    owner: andreim
+    owner: lergor11
     name: d9s
   prerelease: auto
   footer: |
     ## Install
 
     ```sh
-    brew install andreim/tap/d9s
+    brew install lergor11/tap/d9s
     ```
 
     Or download an archive below and verify it against `checksums.txt`:
@@ -82,25 +82,25 @@ release:
     ```
 
 # Homebrew casks are macOS-only; Linux users install from the archives above.
-# The tap repository (andreim/homebrew-tap) and HOMEBREW_TAP_GITHUB_TOKEN must
+# The tap repository (lergor11/homebrew-tap) and HOMEBREW_TAP_GITHUB_TOKEN must
 # both exist before the first tag — see docs/RELEASING.md.
 homebrew_casks:
   - name: d9s
     repository:
-      owner: andreim
+      owner: lergor11
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Casks
     binaries:
       - d9s
-    homepage: https://github.com/andreim/d9s
+    homepage: https://github.com/lergor11/d9s
     description: A k9s-style terminal UI for PostgreSQL, ClickHouse, and Redis
     commit_author:
       name: goreleaser-bot
       email: bot@goreleaser.com
     url:
-      verified: github.com/andreim/d9s/
+      verified: github.com/lergor11/d9s/
     hooks:
       post:
         # The binaries are not signed or notarized, so macOS would otherwise

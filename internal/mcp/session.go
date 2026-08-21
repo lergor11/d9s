@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/db"
-	"github.com/andreim/d9s/internal/sshtunnel"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/sshtunnel"
 )
 
 // session is one live engine session, bound to one database.

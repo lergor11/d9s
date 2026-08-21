@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/session"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/session"
 )
 
 // connFormMsg marks every result the connection editor and its 1Password

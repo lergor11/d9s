@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 // fakeDriver serves canned catalog answers and counts the calls, so a test can

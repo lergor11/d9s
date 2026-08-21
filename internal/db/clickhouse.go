@@ -10,7 +10,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 func init() {

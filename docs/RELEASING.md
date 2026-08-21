@@ -4,7 +4,7 @@ Releases are cut by pushing a semver tag. The `Release` workflow
 (`.github/workflows/release.yml`) runs GoReleaser, which builds darwin and
 linux binaries for amd64 and arm64, attaches the archives and `checksums.txt`
 to a GitHub release with a changelog generated from the commits since the
-previous tag, and pushes a Homebrew cask to `andreim/homebrew-tap`.
+previous tag, and pushes a Homebrew cask to `lergor11/homebrew-tap`.
 
 ## One-time setup
 
@@ -14,11 +14,11 @@ GitHub release first and the cask last, so a missing tap or token fails the run
 and the tag to retry cleanly.
 
 1. **Create the tap repository.** It does not exist yet. Create a public
-   `andreim/homebrew-tap` with a `main` branch and at least one commit (an
+   `lergor11/homebrew-tap` with a `main` branch and at least one commit (an
    empty repository has no branch for GoReleaser to push onto). The `Casks/`
    directory is created by the first release.
 2. **Create the tap token.** The default `GITHUB_TOKEN` cannot push to another
-   repository. Generate a PAT with `contents: write` on `andreim/homebrew-tap`
+   repository. Generate a PAT with `contents: write` on `lergor11/homebrew-tap`
    and add it to the `d9s` repository as the secret
    `HOMEBREW_TAP_GITHUB_TOKEN`.
 
@@ -52,12 +52,12 @@ still pushed, and you can delete the release and the tag afterwards.
 6. **Confirm the artifacts.** On the GitHub release page, check that there are
    four `.tar.gz` archives (darwin and linux, amd64 and arm64), a
    `checksums.txt`, and a changelog listing the commits since the previous tag.
-7. **Confirm the tap.** `andreim/homebrew-tap` should have a new commit adding
+7. **Confirm the tap.** `lergor11/homebrew-tap` should have a new commit adding
    or updating `Casks/d9s.rb`. Verify the install end to end:
 
    ```sh
-   brew untap andreim/tap 2>/dev/null
-   brew install andreim/tap/d9s
+   brew untap lergor11/tap 2>/dev/null
+   brew install lergor11/tap/d9s
    d9s --version
    ```
 
@@ -77,7 +77,7 @@ link time.
 
 - **The tap only serves macOS.** GoReleaser writes `on_linux` blocks into the
   generated cask, but Homebrew does not install casks on Linux, so
-  `brew install andreim/tap/d9s` works on macOS only. Linux users install from
+  `brew install lergor11/tap/d9s` works on macOS only. Linux users install from
   the release archive. Keep that distinction in the README.
 - **The binaries are not signed or notarized.** The cask strips the
   `com.apple.quarantine` attribute on install so the binary runs; a user who

@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/history"
+	"github.com/lergor11/d9s/internal/history"
 )
 
 // histMaxRows is the most history entries listed at once; the list scrolls to

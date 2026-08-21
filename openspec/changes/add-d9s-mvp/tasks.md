@@ -1,7 +1,7 @@
 # Tasks — add-d9s-mvp
 
 ## 1. Project Skeleton
-- [x] 1.1 `go mod init github.com/andreim/d9s`; layout `cmd/d9s`, `internal/*`
+- [x] 1.1 `go mod init github.com/lergor11/d9s`; layout `cmd/d9s`, `internal/*`
 - [x] 1.2 Makefile (build/test/lint), .gitignore, README
 
 ## 2. Config & Secrets

@@ -10,10 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/history"
-	"github.com/andreim/d9s/internal/secrets"
-	"github.com/andreim/d9s/internal/snippets"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/history"
+	"github.com/lergor11/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/snippets"
 )
 
 type viewID int

@@ -9,7 +9,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // SecretResolver resolves an `op://` or `${ENV}` reference to its value.

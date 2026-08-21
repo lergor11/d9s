@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // Exit codes returned by the subcommands. Scripts branch on these, so their

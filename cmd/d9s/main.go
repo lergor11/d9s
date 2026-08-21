@@ -12,10 +12,10 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/andreim/d9s/internal/cli"
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/mcp"
-	"github.com/andreim/d9s/internal/ui"
+	"github.com/lergor11/d9s/internal/cli"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/mcp"
+	"github.com/lergor11/d9s/internal/ui"
 )
 
 // Build metadata, stamped at link time with -ldflags -X. The defaults are what

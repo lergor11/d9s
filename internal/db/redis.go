@@ -12,7 +12,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 func init() {

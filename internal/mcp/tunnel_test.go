@@ -3,7 +3,7 @@ package mcp
 import (
 	"testing"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // bastioned returns a connection reached through an SSH bastion. No test here

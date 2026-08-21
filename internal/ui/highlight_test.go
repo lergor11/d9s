@@ -9,8 +9,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 // rowOf is the zero-based buffer row a byte offset falls on. The editor itself

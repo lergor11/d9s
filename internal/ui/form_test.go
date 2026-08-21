@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/secrets"
 )
 
 // typeText feeds a string in one rune at a time.

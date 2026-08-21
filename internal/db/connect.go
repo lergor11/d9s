@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // connectContext bounds the connect and handshake phase with the connection's

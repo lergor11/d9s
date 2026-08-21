@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreim/d9s/internal/cli"
+	"github.com/lergor11/d9s/internal/cli"
 )
 
 func TestEveryCommandIsRegistered(t *testing.T) {

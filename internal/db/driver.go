@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // DialContextFunc dials a raw TCP connection to the database host. When the

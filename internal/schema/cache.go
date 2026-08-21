@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 // State is how much the cache knows about one set of names.

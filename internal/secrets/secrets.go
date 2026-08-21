@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // Resolver resolves secret references with in-memory caching.

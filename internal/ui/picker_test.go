@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreim/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/secrets"
 )
 
 // openPickerWith puts a picker on screen already loaded with vaults, skipping

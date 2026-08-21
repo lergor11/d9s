@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 // countingCursor is a db.Cursor over a fixed number of rows that records how

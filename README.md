@@ -36,14 +36,14 @@ bastion support and 1Password-backed secrets.
 Homebrew:
 
 ```sh
-brew install andreim/tap/d9s
+brew install lergor11/tap/d9s
 ```
 
 A release archive, verified against its checksum:
 
 ```sh
 VERSION=0.2.0 OS=darwin ARCH=arm64            # or linux / amd64
-BASE=https://github.com/andreim/d9s/releases/download/v$VERSION
+BASE=https://github.com/lergor11/d9s/releases/download/v$VERSION
 curl -sSLO $BASE/d9s_${VERSION}_${OS}_${ARCH}.tar.gz
 curl -sSLO $BASE/checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing

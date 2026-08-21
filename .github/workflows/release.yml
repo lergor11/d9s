@@ -28,6 +28,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # A PAT with write access to andreim/homebrew-tap. The default
+          # A PAT with write access to lergor11/homebrew-tap. The default
           # GITHUB_TOKEN cannot push to another repository.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

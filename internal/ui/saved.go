@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/snippets"
+	"github.com/lergor11/d9s/internal/snippets"
 )
 
 // savedMaxRows is the most saved queries listed at once; the list scrolls to

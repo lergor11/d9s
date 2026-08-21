@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // mapResolver is a stand-in for *secrets.Resolver holding literal values.

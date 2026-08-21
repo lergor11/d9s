@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/db"
-	"github.com/andreim/d9s/internal/export"
+	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/export"
 )
 
 // exportDoneMsg reports the outcome of writing a result to a file.

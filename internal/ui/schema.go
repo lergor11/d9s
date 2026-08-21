@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
 )
 
 const (

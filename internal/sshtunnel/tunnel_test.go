@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andreim/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/config"
 )
 
 // fakeHome creates a short-pathed temp dir (unix socket paths are limited to

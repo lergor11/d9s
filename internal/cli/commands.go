@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/db"
-	"github.com/andreim/d9s/internal/secrets"
-	"github.com/andreim/d9s/internal/session"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/session"
 )
 
 // statementWidth is how much of a statement a label or a diagnostic shows

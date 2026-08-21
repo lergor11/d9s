@@ -1,4 +1,4 @@
-module github.com/andreim/d9s
+module github.com/lergor11/d9s
 
 go 1.26.7
 

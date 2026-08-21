@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andreim/d9s/internal/config"
-	"github.com/andreim/d9s/internal/history"
+	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/history"
 )
 
 // newQueryModel returns a model sitting in the query view with the given
