@@ -1,8 +1,8 @@
 # Tasks — add-saved-queries
 
 ## 1. Storage
-- [ ] 1.1 `internal/snippets`: YAML load/save, scopes, overwrite detection, atomic write with 0600 permissions
-- [ ] 1.2 Unit tests: round trip, scope filtering, hand-edited file reload
+- [x] 1.1 `internal/snippets`: YAML load/save, scopes, overwrite detection, atomic write with 0600 permissions
+- [x] 1.2 Unit tests: round trip, scope filtering, hand-edited file reload
 
 ## 2. UI
 - [ ] 2.1 Save action prompting for a name and scope, with overwrite confirmation

@@ -55,8 +55,15 @@ const (
 	TokenWord TokenKind = iota
 	// TokenQuoted is a quoted name: "..." or, on ClickHouse, `...`.
 	TokenQuoted
-	// TokenString is a string literal, dollar-quoted ones included.
+	// TokenString is a string literal, dollar-quoted ones included, or a
+	// quoted Redis argument.
 	TokenString
+	// TokenNumber is a numeric literal, its fraction and exponent included.
+	TokenNumber
+	// TokenComment is a comment, from its opener to its end.
+	TokenComment
+	// TokenCommand is the command name at the start of a Redis line.
+	TokenCommand
 	// TokenPunct is one byte of punctuation: a comma, a paren, an operator.
 	TokenPunct
 )
@@ -70,13 +77,15 @@ type Token struct {
 	Text  string
 }
 
-// Tokenize splits a SQL script into its lexical elements, dropping whitespace
-// and comments. A string literal, a quoted name and a comment each stay one
-// element, so a keyword or a semicolon written inside one is never reported as
-// code. Redis scripts are line-based rather than lexed, and tokenize as nil.
+// Tokenize splits a script into its lexical elements, dropping whitespace but
+// keeping comments, which callers that only look at code can skip by kind. A
+// string literal, a quoted name and a comment each stay one element, so a
+// keyword or a semicolon written inside one is never reported as code. Redis
+// scripts are lexed one command per line: the first argument of a line is a
+// TokenCommand and the rest are arguments.
 func Tokenize(engine config.EngineType, script string) []Token {
 	if engine == config.Redis {
-		return nil
+		return tokenizeRedis(script)
 	}
 	return tokenizeSQL(script, engine == config.ClickHouse)
 }
@@ -91,6 +100,7 @@ func tokenizeSQL(s string, backtick bool) []Token {
 		end, kind := sqlConsume(s, i, backtick)
 		switch kind {
 		case lexComment:
+			toks = append(toks, Token{Kind: TokenComment, Start: i, End: end, Text: s[i:end]})
 		case lexString:
 			toks = append(toks, Token{Kind: TokenString, Start: i, End: end, Text: s[i:end]})
 		case lexIdent:
@@ -103,8 +113,13 @@ func tokenizeSQL(s string, backtick bool) []Token {
 				for j < len(s) && isWordByte(s[j]) {
 					j++
 				}
-				toks = append(toks, Token{Kind: TokenWord, Start: i, End: j, Text: s[i:j]})
-				i = j
+				tok := Token{Kind: TokenWord, Start: i, End: j}
+				if isDigitByte(c) {
+					tok.Kind, tok.End = TokenNumber, numberEnd(s, j)
+				}
+				tok.Text = s[tok.Start:tok.End]
+				toks = append(toks, tok)
+				i = tok.End
 				continue
 			default:
 				toks = append(toks, Token{Kind: TokenPunct, Start: i, End: end, Text: s[i:end]})
@@ -113,6 +128,88 @@ func tokenizeSQL(s string, backtick bool) []Token {
 		i = end
 	}
 	return toks
+}
+
+func isDigitByte(c byte) bool { return '0' <= c && c <= '9' }
+
+// numberEnd extends a numeric literal whose leading digits end at j over a
+// fractional part and a signed exponent, so 1.5 and 2e-9 each stay one token.
+func numberEnd(s string, j int) int {
+	if j < len(s) && s[j] == '.' {
+		j++
+		for j < len(s) && isWordByte(s[j]) {
+			j++
+		}
+	}
+	if j > 0 && j < len(s) && (s[j-1] == 'e' || s[j-1] == 'E') && (s[j] == '+' || s[j] == '-') {
+		j++
+		for j < len(s) && isWordByte(s[j]) {
+			j++
+		}
+	}
+	return j
+}
+
+// tokenizeRedis lexes a Redis script the way the command splitter reads it: one
+// command per line, arguments separated by whitespace, quoted arguments kept
+// whole, and a '#' line taken as a comment.
+func tokenizeRedis(script string) []Token {
+	var toks []Token
+	for i, first := 0, true; i < len(script); {
+		switch c := script[i]; {
+		case c == '\n':
+			first = true
+			i++
+		case isSpaceByte(c):
+			i++
+		case c == '#' && first:
+			end := len(script)
+			if j := strings.IndexByte(script[i:], '\n'); j >= 0 {
+				end = i + j
+			}
+			toks = append(toks, Token{Kind: TokenComment, Start: i, End: end, Text: script[i:end]})
+			i = end
+		default:
+			end := redisArgEnd(script, i)
+			tok := Token{Kind: TokenWord, Start: i, End: end, Text: script[i:end]}
+			switch {
+			case first:
+				tok.Kind = TokenCommand
+			case c == '"' || c == '\'':
+				tok.Kind = TokenString
+			case isDigitByte(c):
+				tok.Kind = TokenNumber
+			}
+			toks = append(toks, tok)
+			first = false
+			i = end
+		}
+	}
+	return toks
+}
+
+// redisArgEnd returns the index just past the argument starting at i: a quoted
+// argument runs to its closing quote, honoring the backslash escapes the
+// command splitter accepts, and a bare one runs to the next whitespace.
+func redisArgEnd(s string, i int) int {
+	quote := s[i]
+	if quote != '"' && quote != '\'' {
+		for i < len(s) && !isSpaceByte(s[i]) {
+			i++
+		}
+		return i
+	}
+	for j := i + 1; j < len(s); j++ {
+		switch s[j] {
+		case '\\':
+			j++
+		case quote:
+			return j + 1
+		case '\n':
+			return j
+		}
+	}
+	return len(s)
 }
 
 // unquoteName strips the delimiters of a quoted name and collapses the doubled
@@ -223,12 +320,14 @@ func splitSQL(script string, backtick bool) []string {
 		}
 	}
 	for _, t := range tokenizeSQL(script, backtick) {
-		if t.Kind == TokenPunct && t.Text == ";" {
+		switch {
+		case t.Kind == TokenPunct && t.Text == ";":
 			flush(t.Start)
 			start, hasCode = t.End, false
-			continue
+		case t.Kind != TokenComment:
+			// A statement made of nothing but comments has nothing to run.
+			hasCode = true
 		}
-		hasCode = true
 	}
 	flush(len(script))
 	return out

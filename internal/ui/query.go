@@ -69,6 +69,10 @@ type queryModel struct {
 	comp  completionModel
 	cache *schema.Cache
 
+	// First row and column of the editor's visible window. The editor draws
+	// its own highlighted view, so it also does its own scrolling.
+	edTop, edLeft int
+
 	width, height int
 }
 
@@ -76,8 +80,14 @@ func (q *queryModel) open(driver db.Driver, engine config.EngineType, connName, 
 	q.close()
 	ta := textarea.New()
 	ta.Placeholder = placeholderFor(engine)
-	ta.ShowLineNumbers = true
+	// The editor renders its own gutter, line numbers and highlighted text; the
+	// widget keeps the buffer and the cursor. Lines never wrap, so what the
+	// widget's cursor movement assumes and what the screen shows stay the same.
+	ta.ShowLineNumbers = false
+	ta.MaxWidth = 0
+	ta.SetWidth(noWrapWidth)
 	q.ta = ta
+	q.edTop, q.edLeft = 0, 0
 	q.vp = viewport.New(0, 0)
 	q.driver = driver
 	q.engine = engine
@@ -147,7 +157,6 @@ func (q *queryModel) layout(width, bodyHeight int) {
 	if vpH < 1 {
 		vpH = 1
 	}
-	q.ta.SetWidth(width)
 	q.ta.SetHeight(edH)
 	q.vp.Width = width
 	q.vp.Height = vpH
@@ -528,7 +537,7 @@ func (q *queryModel) view(spin string) string {
 	if q.width > lipgloss.Width(line) {
 		line += stDim.Render(strings.Repeat("─", q.width-lipgloss.Width(line)))
 	}
-	return q.ta.View() + "\n" + line + "\n" + q.resultsArea(spin)
+	return q.editorView() + "\n" + line + "\n" + q.resultsArea(spin)
 }
 
 // resultsArea is the results viewport with the completion popup laid over its

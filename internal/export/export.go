@@ -21,8 +21,11 @@ type Format string
 
 // Supported output formats.
 const (
-	CSV  Format = "csv"
+	CSV Format = "csv"
+	// JSON is one array of row objects.
 	JSON Format = "json"
+	// JSONL is one row object per line, for streaming into jq and friends.
+	JSONL Format = "jsonl"
 )
 
 // FormatForPath picks the format from a file extension, defaulting to CSV.
@@ -35,10 +38,14 @@ func FormatForPath(path string) Format {
 
 // Write encodes the result in the given format.
 func Write(w io.Writer, res db.Result, format Format) error {
-	if format == JSON {
+	switch format {
+	case JSON:
 		return writeJSON(w, res)
+	case JSONL:
+		return writeJSONL(w, res)
+	default:
+		return writeCSV(w, res)
 	}
-	return writeCSV(w, res)
 }
 
 // WriteFile encodes the result to path, choosing the format from its
@@ -75,7 +82,26 @@ func writeCSV(w io.Writer, res db.Result) error {
 }
 
 func writeJSON(w io.Writer, res db.Result) error {
-	records := make([]map[string]any, 0, len(res.Rows))
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(records(res))
+}
+
+// writeJSONL writes one object per line and no enclosing array, so a consumer
+// can read a row at a time.
+func writeJSONL(w io.Writer, res db.Result) error {
+	enc := json.NewEncoder(w)
+	for _, rec := range records(res) {
+		if err := enc.Encode(rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// records turns the rows into one map per row, keyed by column name.
+func records(res db.Result) []map[string]any {
+	out := make([]map[string]any, 0, len(res.Rows))
 	for _, row := range res.Rows {
 		rec := make(map[string]any, len(res.Columns))
 		for i, col := range res.Columns {
@@ -88,11 +114,9 @@ func writeJSON(w io.Writer, res db.Result) error {
 			}
 			rec[col] = row[i]
 		}
-		records = append(records, rec)
+		out = append(out, rec)
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(records)
+	return out
 }
 
 // nullCell is how the drivers render a SQL NULL; JSON export maps it back to

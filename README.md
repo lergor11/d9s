@@ -182,6 +182,63 @@ only.
 | `?` | Help overlay |
 | `q` / `Ctrl+C` | Quit |
 
+## Scripting: the command line
+
+Every view is also a subcommand, so the same connections — 1Password secrets,
+bastions, TLS and all — work from a script without a second credentials setup:
+
+```sh
+d9s connections                              # the configured connections
+d9s databases prod-pg                        # databases of one connection
+d9s tables prod-pg app                       # tables of a database
+d9s describe prod-pg public.users            # columns of a table
+d9s query prod-pg 'SELECT id FROM users LIMIT 5'
+d9s query prod-pg -f report.sql              # or from a file
+echo 'SELECT 1' | d9s query prod-pg          # or from stdin
+```
+
+Output is a table on a terminal and JSONL when piped, so a pipeline reads
+clean rows; `-o table|csv|json|jsonl` overrides it. Data goes to stdout and
+everything else to stderr:
+
+```sh
+d9s query prod-pg 'SELECT id, email FROM users LIMIT 5' | jq -r .email
+```
+
+Destructive statements are refused unless `--write` is given, because there is
+no prompt to answer out here. Exit codes tell a script what happened: `0`
+success, `2` usage error or unknown connection, `3` database unreachable, `4`
+statement failed, `5` destructive statement refused.
+
+## Agents: the MCP server
+
+`d9s mcp` serves the same connections over MCP, so Claude Code and similar
+agents can explore a schema and read data while the credentials stay in
+1Password and never enter the agent's context:
+
+```sh
+claude mcp add d9s -- d9s mcp --connections staging-pg,analytics-ch
+```
+
+The tools are `list_connections`, `list_databases`, `list_tables`,
+`describe_table`, and `query`. Install the bundled skill by copying
+`skills/d9s/` into `~/.claude/skills/`; it teaches the workflow of listing and
+describing before querying.
+
+Three things keep an agent from doing damage:
+
+- **Read-only by default.** `query` refuses destructive statements. A write
+  needs *both* `--allow-write` at launch and `allow_write: true` on that
+  connection, so neither a careless prompt nor a single forgotten flag is
+  enough.
+- **Bounded results.** Every response is capped at 200 rows and 100 KB and says
+  when it was cut, so one `SELECT *` cannot flood the context.
+- **A narrow window.** `--connections` limits the server to the connections you
+  name; the rest do not exist as far as the agent is concerned.
+
+Passwords appear in tool output only as the `op://` or `${ENV}` reference they
+come from, never as values.
+
 ## Development
 
 Spec-driven via [OpenSpec](https://github.com/Fission-AI/OpenSpec): see

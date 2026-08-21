@@ -10,10 +10,13 @@ import (
 // render describes a token the way the tests spell it out: kind and text.
 func render(t Token) string {
 	kinds := map[TokenKind]string{
-		TokenWord:   "word",
-		TokenQuoted: "quoted",
-		TokenString: "string",
-		TokenPunct:  "punct",
+		TokenWord:    "word",
+		TokenQuoted:  "quoted",
+		TokenString:  "string",
+		TokenNumber:  "number",
+		TokenComment: "comment",
+		TokenCommand: "command",
+		TokenPunct:   "punct",
 	}
 	return kinds[t.Kind] + ":" + t.Text
 }
@@ -36,17 +39,32 @@ func TestTokenize(t *testing.T) {
 		{
 			name:   "whitespace is dropped",
 			script: "  SELECT\n\t1  ",
-			want:   []string{"word:SELECT", "word:1"},
+			want:   []string{"word:SELECT", "number:1"},
 		},
 		{
-			name:   "a line comment is dropped whole",
+			name:   "a line comment stays one token",
 			script: "SELECT 1 -- FROM users\nFROM t",
-			want:   []string{"word:SELECT", "word:1", "word:FROM", "word:t"},
+			want: []string{
+				"word:SELECT", "number:1", "comment:-- FROM users\n", "word:FROM", "word:t",
+			},
 		},
 		{
-			name:   "a block comment is dropped whole",
+			name:   "a block comment stays one token",
 			script: "SELECT /* FROM users */ 1",
-			want:   []string{"word:SELECT", "word:1"},
+			want:   []string{"word:SELECT", "comment:/* FROM users */", "number:1"},
+		},
+		{
+			name:   "numbers keep their fraction and exponent",
+			script: "SELECT 1, 2.5, 3e-9, 0x1f",
+			want: []string{
+				"word:SELECT", "number:1", "punct:,", "number:2.5", "punct:,",
+				"number:3e-9", "punct:,", "number:0x1f",
+			},
+		},
+		{
+			name:   "a name that merely holds digits is still a name",
+			script: "SELECT t1.id2",
+			want:   []string{"word:SELECT", "word:t1", "punct:.", "word:id2"},
 		},
 		{
 			name:   "a string literal stays one token",
@@ -95,9 +113,40 @@ func TestTokenize(t *testing.T) {
 			want:   []string{"word:SELECT", "string:'oops"},
 		},
 		{
-			name:   "redis scripts are not lexed",
+			name:   "redis names the command apart from its arguments",
 			engine: config.Redis,
 			script: "GET user:1",
+			want:   []string{"command:GET", "word:user:1"},
+		},
+		{
+			name:   "redis lexes each line on its own",
+			engine: config.Redis,
+			script: "GET a\nSET b 12",
+			want:   []string{"command:GET", "word:a", "command:SET", "word:b", "number:12"},
+		},
+		{
+			name:   "redis keeps a quoted argument whole",
+			engine: config.Redis,
+			script: `SET k "two words"`,
+			want:   []string{"command:SET", "word:k", `string:"two words"`},
+		},
+		{
+			name:   "redis honors the escape inside a quoted argument",
+			engine: config.Redis,
+			script: `SET k "a\" b" 2`,
+			want:   []string{"command:SET", "word:k", `string:"a\" b"`, "number:2"},
+		},
+		{
+			name:   "a redis comment line is a comment",
+			engine: config.Redis,
+			script: "# note\nGET a",
+			want:   []string{"comment:# note", "command:GET", "word:a"},
+		},
+		{
+			name:   "a hash inside a redis argument is not a comment",
+			engine: config.Redis,
+			script: "GET #tag",
+			want:   []string{"command:GET", "word:#tag"},
 		},
 		{
 			name:   "an empty script has no tokens",

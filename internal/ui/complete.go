@@ -95,8 +95,9 @@ func completionRequestAt(engine config.EngineType, buf string, cursor int) compl
 	req := completionRequest{word: word, qualifier: qualifier}
 
 	// Only the statement holding the cursor names the tables in scope; a name
-	// in an earlier statement of the buffer has nothing to do with here.
-	toks := statementTokens(db.Tokenize(engine, buf), cursor)
+	// in an earlier statement of the buffer has nothing to do with here, and a
+	// comment names nothing at all.
+	toks := codeTokens(statementAt(db.Tokenize(engine, buf), cursor, len(buf)).toks)
 
 	// The clause is read from the tokens before the whole name, qualifier
 	// included, so `FROM analytics.` still reads as a table position.
@@ -130,24 +131,6 @@ func completionRequestAt(engine config.EngineType, buf string, cursor int) compl
 		}
 	}
 	return req
-}
-
-// statementTokens narrows a buffer's tokens to the statement holding the
-// cursor, cutting at the top-level semicolons around it.
-func statementTokens(toks []db.Token, cursor int) []db.Token {
-	first, last := 0, len(toks)
-	for i, t := range toks {
-		if !isPunct(t, ";") {
-			continue
-		}
-		if t.End <= cursor {
-			first = i + 1
-			continue
-		}
-		last = i
-		break
-	}
-	return toks[first:last]
 }
 
 // tokensBefore keeps the tokens that end at or before the byte offset.
@@ -605,16 +588,8 @@ func (c *completionModel) move(delta int) {
 func (q *queryModel) editorCursor() (string, int) {
 	buf := q.ta.Value()
 	lines := strings.Split(buf, "\n")
-	row := min(max(q.ta.Line(), 0), len(lines)-1)
-	info := q.ta.LineInfo()
-	runes := []rune(lines[row])
-	col := min(max(info.StartColumn+info.ColumnOffset, 0), len(runes))
-
-	offset := 0
-	for _, line := range lines[:row] {
-		offset += len(line) + 1
-	}
-	return buf, offset + len(string(runes[:col]))
+	row, col := q.cursorRowCol()
+	return buf, offsetOf(lineStarts(lines), lines, row, col)
 }
 
 // wordAtCursor is the partial name an insertion replaces: the SQL name under

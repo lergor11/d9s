@@ -2,7 +2,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -133,6 +136,11 @@ type Connection struct {
 	Mode       RedisMode `yaml:"mode"`
 	MasterName string    `yaml:"master_name"`
 	Addresses  []string  `yaml:"addresses"`
+
+	// AllowWrite opts the connection in to destructive statements from the MCP
+	// server. It is one half of the gate: `d9s mcp` must also be started with
+	// --allow-write. The TUI, which has a human at the keyboard, ignores it.
+	AllowWrite bool `yaml:"allow_write"`
 }
 
 // IsUnixSocket reports whether Host names a unix socket directory rather than
@@ -229,10 +237,20 @@ func Load(path string) (*Config, []Warning, error) {
 		}
 		return nil, nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
+	return parse(raw, path)
+}
+
+// parse decodes and validates config bytes. The writer runs its result through
+// here before accepting it, so an edit can never produce a file that Load
+// would then reject.
+func parse(raw []byte, path string) (*Config, []Warning, error) {
 	var cfg Config
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return &Config{}, nil, nil // an empty file is an empty config
+		}
 		return nil, nil, fmt.Errorf("parsing config %s: %w", path, err)
 	}
 	warns, err := cfg.validate()

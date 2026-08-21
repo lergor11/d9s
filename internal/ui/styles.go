@@ -22,6 +22,23 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("39")).
 			Padding(1, 2)
+	// Editor syntax colours. They come from the same mid-tone 256-colour
+	// palette as the rest of the interface, which keeps them legible on a light
+	// and on a dark terminal; identifiers deliberately keep the terminal's own
+	// foreground, so the eye lands on the syntax around them.
+	stSyntaxPlain   = lipgloss.NewStyle()
+	stSyntaxKeyword = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	stSyntaxString  = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	stSyntaxNumber  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	stSyntaxComment = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+
+	// Editor gutter and line numbers. The gutter brightens on the rows of the
+	// statement a run starts from.
+	stGutter           = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	stGutterActive     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("135"))
+	stLineNumber       = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	stCursorLineNumber = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
 	// stPopup frames the completion list, which sits over the results area
 	// while the editor keeps the focus, so it stays as compact as possible.
 	stPopup = lipgloss.NewStyle().

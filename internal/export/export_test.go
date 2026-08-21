@@ -89,6 +89,46 @@ func TestWriteJSONMapsNullsAndKeysByColumn(t *testing.T) {
 	}
 }
 
+func TestWriteJSONLIsOneObjectPerLine(t *testing.T) {
+	var buf strings.Builder
+	if err := Write(&buf, sampleResult(), JSONL); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want one per row:\n%s", len(lines), buf.String())
+	}
+	for i, line := range lines {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("line %d (%q) is not a JSON object: %v", i+1, line, err)
+		}
+	}
+	// The embedded newline must be escaped, or a row would span two lines and
+	// break every line-oriented reader.
+	if !strings.Contains(lines[2], `multi\nline`) {
+		t.Errorf("line 3 = %q, want the newline escaped", lines[2])
+	}
+
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("decoding the first line: %v", err)
+	}
+	if note, ok := first["note"]; !ok || note != nil {
+		t.Errorf("first line's note = %v (present=%v), want an explicit null", note, ok)
+	}
+}
+
+func TestWriteJSONLEmptyResultWritesNothing(t *testing.T) {
+	var buf strings.Builder
+	if err := Write(&buf, db.Result{Columns: []string{"a"}}, JSONL); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := buf.String(); got != "" {
+		t.Errorf("JSONL of a row-less result = %q, want no output at all", got)
+	}
+}
+
 func TestWriteJSONEmptyResultIsEmptyArray(t *testing.T) {
 	var buf strings.Builder
 	if err := Write(&buf, db.Result{Columns: []string{"a"}}, JSON); err != nil {

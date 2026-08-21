@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 
@@ -59,18 +58,26 @@ func (r *Resolver) Resolve(ctx context.Context, v string) (string, error) {
 	}
 }
 
-func runOpCLI(ctx context.Context, ref string) (string, error) {
-	path, err := exec.LookPath("op")
-	if err != nil {
-		return "", fmt.Errorf("1Password CLI (op) not found on PATH; install it and enable 'Integrate with 1Password CLI' in the desktop app")
+// Validate reports whether ref resolves, without revealing what it names. The
+// secret is read and discarded: it is never returned, logged, or quoted in the
+// error, which carries the reference and the CLI's reason instead.
+//
+// Validation always asks the CLI, bypassing the cache, so it answers whether
+// the reference resolves now rather than whether it once did.
+func (r *Resolver) Validate(ctx context.Context, ref string) error {
+	if !config.IsOpRef(ref) {
+		return fmt.Errorf("%q is not a 1Password reference (want op://vault/item/field)", ref)
 	}
-	cmd := exec.CommandContext(ctx, path, "read", "--no-newline", ref)
-	out, err := cmd.Output()
+	if _, err := r.runOp(ctx, ref); err != nil {
+		return fmt.Errorf("%s does not resolve: %w", ref, err)
+	}
+	return nil
+}
+
+func runOpCLI(ctx context.Context, ref string) (string, error) {
+	out, err := runOpJSON(ctx, "read", "--no-newline", ref)
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			return "", fmt.Errorf("op read %s: %s", ref, strings.TrimSpace(string(ee.Stderr)))
-		}
-		return "", fmt.Errorf("op read %s: %w", ref, err)
+		return "", err
 	}
 	return strings.TrimRight(string(out), "\r\n"), nil
 }
