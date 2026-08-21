@@ -1,0 +1,39 @@
+# Demo configuration for the three engines running as local Docker containers.
+# No 1Password and no SSH bastion involved — see the README for those.
+# The containers serve plaintext, so every connection opts out of TLS; a direct
+# connection without a `tls` block would otherwise default to `require`.
+#
+#   docker run -d --rm --name d9s-pg -e POSTGRES_PASSWORD=secret -p 15432:5432 postgres:16-alpine
+#   docker run -d --rm --name d9s-redis -p 16379:6379 redis:7-alpine
+#   docker run -d --rm --name d9s-ch -p 19000:9000 clickhouse/clickhouse-server:24-alpine
+#
+#   D9S_CONFIG=examples/demo-docker.yaml ./d9s
+#
+# Tear down with: docker stop d9s-pg d9s-redis d9s-ch
+
+connections:
+  - name: demo-pg
+    type: postgres
+    host: 127.0.0.1
+    port: 15432
+    user: postgres
+    password: ${DEMO_PG_PASSWORD}
+    database: postgres
+    tls:
+      mode: disable
+
+  - name: demo-ch
+    type: clickhouse
+    host: 127.0.0.1
+    port: 19000
+    user: default
+    database: default
+    tls:
+      mode: disable
+
+  - name: demo-redis
+    type: redis
+    host: 127.0.0.1
+    port: 16379
+    tls:
+      mode: disable

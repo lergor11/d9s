@@ -28,3 +28,31 @@ jobs:
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+
+  # Runs the real release build without publishing, so a change that breaks
+  # packaging fails here rather than on the tag.
+  release-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snapshot-dist
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          # The archives are already compressed, and an empty upload would
+          # mean the packaging silently produced nothing.
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7

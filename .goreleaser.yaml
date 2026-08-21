@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: d9s
+
+builds:
+  - id: d9s
+    main: ./cmd/d9s
+    binary: d9s
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    # main.version carries the leading "v" so `d9s --version` echoes the tag as
+    # it was pushed; .Version itself has the "v" stripped by GoReleaser.
+    ldflags:
+      - -s -w
+      - -X main.version=v{{ .Version }}
+      - -X main.commit={{ .FullCommit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: d9s
+    ids:
+      - d9s
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  algorithm: sha256
+  name_template: checksums.txt
+
+changelog:
+  # Read straight from git so the changelog is the commits since the previous
+  # tag, with no dependency on the forge's API.
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^Merge (pull request|branch)"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+release:
+  github:
+    owner: andreim
+    name: d9s
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```sh
+    brew install andreim/tap/d9s
+    ```
+
+    Or download an archive below and verify it against `checksums.txt`:
+
+    ```sh
+    sha256sum --check --ignore-missing checksums.txt
+    ```
+
+# Homebrew casks are macOS-only; Linux users install from the archives above.
+# The tap repository (andreim/homebrew-tap) and HOMEBREW_TAP_GITHUB_TOKEN must
+# both exist before the first tag — see docs/RELEASING.md.
+homebrew_casks:
+  - name: d9s
+    repository:
+      owner: andreim
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    binaries:
+      - d9s
+    homepage: https://github.com/andreim/d9s
+    description: A k9s-style terminal UI for PostgreSQL, ClickHouse, and Redis
+    commit_author:
+      name: goreleaser-bot
+      email: bot@goreleaser.com
+    url:
+      verified: github.com/andreim/d9s/
+    hooks:
+      post:
+        # The binaries are not signed or notarized, so macOS would otherwise
+        # quarantine them on first run.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/d9s"]
+          end
