@@ -18,7 +18,7 @@
 ## 4. Verification
 - [x] 4.1 Unit tests per tool against a fake driver, including refusal and truncation
 - [x] 4.2 An end-to-end test driving the server over stdio with real MCP frames
-- [ ] 4.3 README section — text handed to the change owner, who owns README.md
+- [x] 4.3 README section
 - [x] 4.4 `make lint test` green
 
 ## Notes
