@@ -210,6 +210,22 @@ no prompt to answer out here. Exit codes tell a script what happened: `0`
 success, `2` usage error or unknown connection, `3` database unreachable, `4`
 statement failed, `5` destructive statement refused.
 
+Three more things worth knowing. `-database name` picks the database for
+`describe` and `query`, for connections whose configuration does not name one.
+`-timeout 30s` bounds the whole command, on top of the per-connection
+`connect_timeout`. And SQL that begins with a dash needs a `--` ahead of it, so
+the flag parser leaves it alone:
+
+```sh
+d9s query prod-pg -database analytics 'SELECT count(*) FROM events'
+d9s query prod-pg -timeout 30s -f slow-report.sql
+d9s query prod-pg -- '-- monthly totals
+SELECT month, sum(amount) FROM invoices GROUP BY month'
+```
+
+Flags may come before, between, or after the positional arguments, so
+`d9s query prod-pg 'SELECT 1' -o csv` works as written.
+
 ## Agents: the MCP server
 
 `d9s mcp` serves the same connections over MCP, so Claude Code and similar
@@ -255,5 +271,8 @@ docker run -d --rm -p 19000:9000 clickhouse/clickhouse-server:24-alpine
 
 D9S_IT_PG_PORT=15432 D9S_IT_PG_PASSWORD=secret \
 D9S_IT_CH_PORT=19000 D9S_IT_REDIS_PORT=16379 \
-  go test -tags integration ./internal/db
+  go test -tags integration ./internal/db ./internal/cli
 ```
+
+The `internal/cli` suite drives the subcommands end to end against the same
+containers and asserts the exit codes.
