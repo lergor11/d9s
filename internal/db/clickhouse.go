@@ -6,7 +6,6 @@ import (
 	"net"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
@@ -19,8 +18,9 @@ func init() {
 }
 
 type clickhouseDriver struct {
-	conn     chdriver.Conn
-	database string
+	conn      chdriver.Conn
+	database  string
+	resultCap int
 }
 
 func (d *clickhouseDriver) Connect(ctx context.Context, t Target) error {
@@ -76,6 +76,7 @@ func (d *clickhouseDriver) Connect(ctx context.Context, t Target) error {
 	}
 	d.conn = conn
 	d.database = database
+	d.resultCap = t.Config.EffectiveResultCap()
 	return nil
 }
 
@@ -145,42 +146,63 @@ WHERE database = ? AND table = ? ORDER BY position`
 	return cols, rows.Err()
 }
 
-func (d *clickhouseDriver) Execute(ctx context.Context, statement string) (res Result) {
-	res.Statement = statement
-	res.Affected = -1
-	start := time.Now()
-	defer func() { res.Duration = time.Since(start) }()
+func (d *clickhouseDriver) Execute(ctx context.Context, statement string) Result {
+	return executeViaCursor(ctx, d, statement)
+}
 
+// ExecuteStream runs a statement and returns a cursor over its rows, leaving
+// the ClickHouse result open until the cursor is closed or ctx is cancelled.
+func (d *clickhouseDriver) ExecuteStream(ctx context.Context, statement string) (Cursor, error) {
 	if !clickhouseReturnsRows(statement) {
-		res.Err = d.conn.Exec(ctx, statement)
-		return res
+		if err := d.conn.Exec(ctx, statement); err != nil {
+			return nil, err
+		}
+		// No result set to page over.
+		return newRowCursor(nil, nil, -1), nil
 	}
 	rows, err := d.conn.Query(ctx, statement)
 	if err != nil {
-		res.Err = err
-		return res
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	res.Columns = rows.Columns()
-	types := rows.ColumnTypes()
-	for rows.Next() {
-		dest := make([]any, len(types))
-		for i, t := range types {
+	src := &chSource{rows: rows, types: rows.ColumnTypes()}
+	return newCursor(ctx, rows.Columns(), d.resultCap, src), nil
+}
+
+// chSource pages a ClickHouse result. Each row is scanned into fresh values of
+// the column types, because the driver scans into typed destinations rather
+// than handing back an untyped row.
+type chSource struct {
+	rows  chdriver.Rows
+	types []chdriver.ColumnType
+}
+
+func (s *chSource) fetch(n int) ([][]string, bool, error) {
+	out := make([][]string, 0, min(n, 1024))
+	for len(out) < n {
+		if !s.rows.Next() {
+			return out, true, s.rows.Err()
+		}
+		dest := make([]any, len(s.types))
+		for i, t := range s.types {
 			dest[i] = reflect.New(t.ScanType()).Interface()
 		}
-		if err := rows.Scan(dest...); err != nil {
-			res.Err = err
-			return res
+		if err := s.rows.Scan(dest...); err != nil {
+			return out, true, err
 		}
 		row := make([]string, len(dest))
 		for i, v := range dest {
 			row[i] = stringify(reflect.ValueOf(v).Elem().Interface())
 		}
-		res.Rows = append(res.Rows, row)
+		out = append(out, row)
 	}
-	res.Err = rows.Err()
-	return res
+	return out, false, nil
 }
+
+func (s *chSource) release() error { return s.rows.Close() }
+
+// affected: ClickHouse reports no row count for the statements that go through
+// a result set.
+func (s *chSource) affected() int64 { return -1 }
 
 // clickhouseReturnsRows classifies a statement by its first keyword: queries
 // go through Query, everything else through Exec.

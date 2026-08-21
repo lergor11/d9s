@@ -63,7 +63,7 @@ Flags:
 Commands (each takes -help of its own):
 {{range .Commands}}  {{printf "%-34s" .Synopsis}} {{.Summary}}
 {{end}}
-Command flags:
+Flags of the listing and query commands:
   -config path   configuration file
   -o format      table, csv, json, or jsonl
                  (default: table on a terminal, jsonl when piped)

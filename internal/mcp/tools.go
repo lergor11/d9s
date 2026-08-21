@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -225,16 +226,50 @@ func (s *Server) query(ctx context.Context, in queryArgs) (string, error) {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		res := sess.driver.Execute(ctx, stmt)
-		b.WriteString(formatResult(res))
-		if res.Err != nil {
+		text, err := runStatement(ctx, sess.driver, stmt)
+		b.WriteString(text)
+		if err != nil {
+			b.WriteString(formatFailure(stmt, err))
 			for _, rest := range stmts[i+1:] {
-				b.WriteString("\n" + formatResult(db.Result{Statement: rest, Skipped: true}))
+				b.WriteString("\n" + formatSkipped(rest))
 			}
 			break
 		}
 	}
 	return b.String(), nil
+}
+
+// runStatement executes one statement and renders at most a capped page of its
+// result. It streams: the cursor stops reading once the row cap is met, so a
+// `SELECT *` against a large table costs one page rather than the whole result
+// buffered in memory and then thrown away. A driver with no streaming of its
+// own still works — db.Stream buffers for it — so the caller has one path.
+//
+// A returned error means the statement failed; the caller renders it, having
+// the statement text to hand.
+func runStatement(ctx context.Context, driver db.Driver, statement string) (string, error) {
+	started := time.Now()
+	cursor, err := db.Stream(ctx, driver, statement)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = cursor.Close() }()
+
+	cursor.SetCap(MaxRows)
+	rows, err := cursor.NextPage(MaxRows)
+	if err != nil {
+		return "", err
+	}
+	columns := cursor.Columns()
+	if len(columns) > 0 {
+		return formatPage(statement, columns, rows, cursor.Truncated(), -1, time.Since(started)), nil
+	}
+	// A statement that returned no columns changed rows instead, and the count
+	// is only meaningful once the engine's result is drained.
+	if err := cursor.Close(); err != nil {
+		return "", err
+	}
+	return formatPage(statement, nil, nil, false, cursor.Affected(), time.Since(started)), nil
 }
 
 // checkWrite applies the write gate. Both switches are required, and the

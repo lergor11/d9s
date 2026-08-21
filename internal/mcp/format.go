@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/andreim/d9s/internal/db"
 )
 
 // The caps that bound every tool response. They exist so a `SELECT *` against
@@ -28,17 +26,31 @@ const (
 // cutMarker ends a value or a response that was cut to fit a cap.
 const cutMarker = "…(cut)"
 
-// grid renders a result as an aligned text table bounded by the row, cell and
-// byte caps, followed by a notice for every cap that fired. A notice always
-// states how many rows the agent is actually looking at, and out of how many.
+// grid renders rows the caller holds in full, so a truncation notice can name
+// the total the agent is missing out of.
 func grid(columns []string, rows [][]string) string {
-	total := len(rows)
-	if total == 0 {
+	return renderGrid(columns, rows, len(rows), false)
+}
+
+// gridPaged renders one page of a streamed result. The total is unknown by
+// design — counting it would mean reading the rows the cap exists to avoid —
+// so more carries what the cursor knows instead: that further rows remain.
+func gridPaged(columns []string, rows [][]string, more bool) string {
+	return renderGrid(columns, rows, -1, more)
+}
+
+// renderGrid renders a result as an aligned text table bounded by the row,
+// cell and byte caps, followed by a notice for every cap that fired. A notice
+// always states how many rows the agent is actually looking at, and out of how
+// many when total says; a negative total means only that more remain.
+func renderGrid(columns []string, rows [][]string, total int, more bool) string {
+	if len(rows) == 0 {
 		return "(no rows)"
 	}
 	capped := rows
-	if total > MaxRows {
+	if len(rows) > MaxRows {
 		capped = rows[:MaxRows]
+		more = true
 	}
 
 	// Values are cut before the widths are measured, so one oversized cell
@@ -85,15 +97,19 @@ func grid(columns []string, rows [][]string) string {
 	}
 
 	var reasons []string
-	if total > MaxRows {
+	if more {
 		reasons = append(reasons, fmt.Sprintf("the %d-row cap", MaxRows))
 	}
 	if shown < len(cells) {
 		reasons = append(reasons, fmt.Sprintf("the %d-byte response cap", MaxBytes))
 	}
 	if len(reasons) > 0 {
-		fmt.Fprintf(&b, "\nTruncated by %s: %d of %d rows shown. Narrow the query with a WHERE clause or a LIMIT to see the rest.\n",
-			strings.Join(reasons, " and "), shown, total)
+		count := fmt.Sprintf("%d rows shown and more remain", shown)
+		if total >= 0 {
+			count = fmt.Sprintf("%d of %d rows shown", shown, total)
+		}
+		fmt.Fprintf(&b, "\nTruncated by %s: %s. Narrow the query with a WHERE clause or a LIMIT to see the rest.\n",
+			strings.Join(reasons, " and "), count)
 	}
 	if cut > 0 {
 		fmt.Fprintf(&b, "Values over the %d-byte cell cap were cut (%d of them); a cut value ends with %q.\n", maxCellBytes, cut, cutMarker)
@@ -150,22 +166,34 @@ func cutBytes(s string, limit int) (string, bool) {
 	return s[:keep] + marker, true
 }
 
-// formatResult renders one executed statement: the grid it returned, the rows
-// it affected, or why it failed.
-func formatResult(res db.Result) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "-- %s\n", oneLine(res.Statement))
+// heading opens the block reporting on one statement.
+func heading(statement string) string {
+	return fmt.Sprintf("-- %s\n", oneLine(statement))
+}
+
+// formatSkipped reports a statement that never ran.
+func formatSkipped(statement string) string {
+	return heading(statement) + "Skipped: an earlier statement in the same call failed.\n"
+}
+
+// formatFailure reports a statement the engine rejected.
+func formatFailure(statement string, err error) string {
+	return heading(statement) + fmt.Sprintf("Failed: %s\n", err)
+}
+
+// formatPage renders one page of a statement's result: the rows it returned,
+// or the rows it affected when it returned none. more reports that the cursor
+// stopped at the row cap with rows left behind.
+func formatPage(statement string, columns []string, rows [][]string, more bool, affected int64, elapsed time.Duration) string {
+	b := strings.Builder{}
+	b.WriteString(heading(statement))
 	switch {
-	case res.Skipped:
-		b.WriteString("Skipped: an earlier statement in the same call failed.\n")
-	case res.Err != nil:
-		fmt.Fprintf(&b, "Failed: %s\n", res.Err)
-	case len(res.Columns) > 0:
-		b.WriteString(grid(res.Columns, res.Rows))
-	case res.Affected >= 0:
-		fmt.Fprintf(&b, "OK: %s affected in %s.\n", countRows(res.Affected), res.Duration.Round(time.Millisecond))
+	case len(columns) > 0:
+		b.WriteString(gridPaged(columns, rows, more))
+	case affected >= 0:
+		fmt.Fprintf(&b, "OK: %s affected in %s.\n", countRows(affected), elapsed.Round(time.Millisecond))
 	default:
-		fmt.Fprintf(&b, "OK in %s.\n", res.Duration.Round(time.Millisecond))
+		fmt.Fprintf(&b, "OK in %s.\n", elapsed.Round(time.Millisecond))
 	}
 	return b.String()
 }

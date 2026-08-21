@@ -7,35 +7,9 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/andreim/d9s/internal/config"
 	"github.com/andreim/d9s/internal/history"
 )
-
-// key turns a key name into the KeyMsg the terminal would produce.
-func key(name string) tea.KeyMsg {
-	switch name {
-	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
-	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEscape}
-	case "up":
-		return tea.KeyMsg{Type: tea.KeyUp}
-	case "down":
-		return tea.KeyMsg{Type: tea.KeyDown}
-	case "backspace":
-		return tea.KeyMsg{Type: tea.KeyBackspace}
-	case "space":
-		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
-	case "ctrl+h":
-		return tea.KeyMsg{Type: tea.KeyCtrlH}
-	case "ctrl+u":
-		return tea.KeyMsg{Type: tea.KeyCtrlU}
-	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name)}
-	}
-}
 
 // newQueryModel returns a model sitting in the query view with the given
 // history entries already loaded and the overlay open.

@@ -13,6 +13,7 @@ import (
 	"github.com/andreim/d9s/internal/config"
 	"github.com/andreim/d9s/internal/history"
 	"github.com/andreim/d9s/internal/secrets"
+	"github.com/andreim/d9s/internal/snippets"
 )
 
 type viewID int
@@ -43,8 +44,15 @@ type model struct {
 	hist    *history.Store // nil when no history location could be determined
 	histErr string         // why hist is nil
 
+	snips    *snippets.Store // nil when no saved-query location could be determined
+	snipsErr string          // why snips is nil
+
 	conns   []*connState
 	selConn int
+
+	// editor is the add/edit/delete overlay over the connection list; nil when
+	// the user is not editing a connection.
+	editor *connEditor
 
 	activeConn int // index into conns whose databases are listed
 	selDB      int
@@ -87,6 +95,12 @@ func newModel(cfg *config.Config, warns []config.Warning, cfgPath, version strin
 	} else {
 		m.hist = hist
 	}
+	snips, err := snippets.Default()
+	if err != nil {
+		m.snipsErr = err.Error()
+	} else {
+		m.snips = snips
+	}
 	return m
 }
 
@@ -105,6 +119,9 @@ func (m *model) closeAll() {
 }
 
 func (m *model) spinning() bool {
+	if m.editor != nil && m.editor.busy != "" {
+		return true
+	}
 	if m.dbOpening != "" || m.query.running || m.query.schema.inflight {
 		return true
 	}
@@ -158,6 +175,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipboardDoneMsg:
 		m.handleClipboardDone(msg)
 		return m, nil
+	case cellCopiedMsg:
+		m.handleCellCopied(msg)
+		return m, nil
+	case savedLoadedMsg:
+		m.handleSavedLoaded(msg)
+		return m, nil
+	case savedWroteMsg:
+		return m, m.handleSavedWrote(msg)
+	case connFormMsg:
+		return m, m.handleConnFormMsg(msg)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -198,7 +225,7 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// '?' opens help everywhere except where the query view takes the key
 	// itself: the editor, the confirmation modal and the history filter.
-	if key == "?" && (m.view != viewQuery || !m.query.capturesKeys()) {
+	if key == "?" && !m.capturesKeys() {
 		m.showHelp = true
 		return m, nil
 	}
@@ -244,6 +271,10 @@ func (m *model) View() string {
 		body = m.overlay(m.query.schemaView(m.width, m.bodyHeight(), m.spinner.View()))
 	case m.view == viewQuery && m.query.exportPrompt:
 		body = m.overlay(m.query.exportPromptView(m.width))
+	case m.view == viewQuery && m.query.saved.open:
+		body = m.overlay(m.query.savedView(m.width, m.bodyHeight()))
+	case m.view == viewQuery && m.query.inspect.open:
+		body = m.overlay(m.query.inspectView())
 	default:
 		switch m.view {
 		case viewConnections:
@@ -295,7 +326,7 @@ func (m *model) footerView() string {
 	var hints string
 	switch m.view {
 	case viewConnections:
-		hints = "j/k move · enter connect · q quit · ? help"
+		hints = m.connectionsHints()
 	case viewDatabases:
 		hints = "j/k move · enter open · esc back · ? help"
 	case viewQuery:
@@ -330,9 +361,7 @@ func (m *model) helpView() string {
 	}
 	switch m.view {
 	case viewConnections:
-		write("j/k, ↑/↓", "move selection")
-		write("enter", "connect / open databases")
-		write("q", "quit")
+		m.connectionsHelp(write)
 	case viewDatabases:
 		write("j/k, ↑/↓", "move selection")
 		write("enter", "open query view")

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -47,6 +48,12 @@ type connResultMsg struct {
 const connectTimeout = 60 * time.Second
 
 func (m *model) updateConnections(msg tea.KeyMsg) tea.Cmd {
+	// The editor overlays this view and takes every key while it is open,
+	// including the ones the list would otherwise treat as commands.
+	if m.editor != nil {
+		return m.updateEditor(msg)
+	}
+
 	switch msg.String() {
 	case "q":
 		return tea.Quit
@@ -57,6 +64,18 @@ func (m *model) updateConnections(msg tea.KeyMsg) tea.Cmd {
 	case "k", "up":
 		if m.selConn > 0 {
 			m.selConn--
+		}
+	case "a":
+		m.editor = &connEditor{form: newConnForm()}
+	case "e":
+		if len(m.conns) > 0 {
+			m.editor = &connEditor{form: editConnForm(m.conns[m.selConn].cfg)}
+		}
+	case "d":
+		if len(m.conns) > 0 {
+			m.editor = &connEditor{confirm: &editorConfirm{
+				kind: editorConfirmDelete, name: m.conns[m.selConn].cfg.Name,
+			}}
 		}
 	case "enter":
 		if len(m.conns) == 0 {
@@ -135,6 +154,12 @@ func (m *model) handleConnResult(msg connResultMsg) {
 }
 
 func (m *model) connectionsView() string {
+	// The editor is drawn as an overlay over this view rather than as a view of
+	// its own, which keeps the connection list the only thing that routes its
+	// keys and the only thing that knows it exists.
+	if m.editor != nil {
+		return m.overlay(m.editorView())
+	}
 	if len(m.conns) == 0 {
 		return m.onboardingView()
 	}
@@ -227,7 +252,118 @@ func tlsBadge(conn config.Connection, width int) string {
 func (m *model) onboardingView() string {
 	var b strings.Builder
 	b.WriteString(stSection.Render("No connections configured") + "\n\n")
-	b.WriteString("Create " + stHeader.Render(m.cfgPath) + " with entries like:\n\n")
+	b.WriteString("Press " + stBadge.Render("a") + " to add one; d9s creates " +
+		stHeader.Render(m.cfgPath) + " for you.\n\n")
+	b.WriteString(stDim.Render("Or write the file yourself, with entries like:") + "\n\n")
 	b.WriteString(stDim.Render(config.Sample))
 	return b.String()
+}
+
+// reloadConfig re-reads the configuration after a write and rebuilds the
+// connection list. A connection whose configuration is unchanged keeps its
+// live driver and tunnel; one that was edited or removed has its session
+// closed, because it no longer describes what is on the other end.
+func (m *model) reloadConfig() error {
+	cfg, warns, err := config.Load(m.cfgPath)
+	if err != nil {
+		return err
+	}
+
+	previous := make(map[string]*connState, len(m.conns))
+	for _, cs := range m.conns {
+		previous[cs.cfg.Name] = cs
+	}
+	activeName := ""
+	if m.activeConn >= 0 && m.activeConn < len(m.conns) {
+		activeName = m.conns[m.activeConn].cfg.Name
+	}
+
+	conns := make([]*connState, len(cfg.Connections))
+	for i, c := range cfg.Connections {
+		if kept, ok := previous[c.Name]; ok && reflect.DeepEqual(kept.cfg, c) {
+			conns[i] = kept
+			delete(previous, c.Name)
+			continue
+		}
+		conns[i] = &connState{cfg: c}
+	}
+	for _, stale := range previous {
+		closeConnState(stale)
+	}
+
+	m.cfg, m.warns, m.conns = cfg, warns, conns
+	m.activeConn = -1
+	for i, cs := range conns {
+		if cs.cfg.Name == activeName {
+			m.activeConn = i
+		}
+	}
+	if m.selConn >= len(conns) {
+		m.selConn = len(conns) - 1
+	}
+	if m.selConn < 0 {
+		m.selConn = 0
+	}
+	return nil
+}
+
+// closeConnState releases the driver and tunnel of a connection that is going
+// away.
+func closeConnState(cs *connState) {
+	if cs.driver != nil {
+		_ = cs.driver.Close()
+	}
+	if cs.tunnel != nil {
+		_ = cs.tunnel.Close()
+	}
+}
+
+// capturesKeys reports whether something on screen is consuming keystrokes
+// that would otherwise be read as commands — the connection editor's text
+// fields, or the query view's own editor and prompts.
+func (m *model) capturesKeys() bool {
+	if m.editor != nil {
+		return true
+	}
+	return m.view == viewQuery && m.query.capturesKeys()
+}
+
+// connectionsHints is the footer legend for the connection list and whatever
+// the editor has on top of it.
+func (m *model) connectionsHints() string {
+	if m.editor == nil {
+		return "j/k move · enter connect · a add · e edit · d delete · q quit · ? help"
+	}
+	e := m.editor
+	switch {
+	case e.busy != "":
+		return "working... · esc give up"
+	case e.confirm != nil && e.confirm.kind == editorConfirmPlaintext:
+		return "y store plaintext · n cancel · p pick from 1Password"
+	case e.confirm != nil:
+		return "y delete · n cancel"
+	case e.picker != nil:
+		return "type to filter · ↑/↓ select · enter choose · esc back"
+	default:
+		return formHints
+	}
+}
+
+// connectionsHelp writes the connection-list bindings into the help overlay.
+func (m *model) connectionsHelp(write func(key, desc string)) {
+	write("j/k, ↑/↓", "move selection")
+	write("enter", "connect / open databases")
+	write("a", "add a connection")
+	write("e", "edit the selected connection")
+	write("d", "delete the selected connection (asks first)")
+	write("q", "quit")
+	write("", "")
+	write("in the form:", "")
+	write("tab, ↑/↓", "move between fields")
+	write("←/→", "change the engine")
+	write("enter, ctrl+s", "save to "+m.cfgPath)
+	write("ctrl+t", "test the connection without saving")
+	write("ctrl+p", "pick a password from 1Password")
+	write("ctrl+k", "check that the op:// reference resolves")
+	write("esc", "cancel")
 }

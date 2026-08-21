@@ -23,6 +23,13 @@
 
 ## Notes
 - SDK pinned at `github.com/modelcontextprotocol/go-sdk v1.7.0`.
+- Sessions are per connection *and* database, because an engine binds one
+  database at connect time, but what is expensive is shared per connection:
+  the resolver caches the secret, and one `sshtunnel.Tunnel` serves every
+  database session on a connection, which is the arrangement that type is
+  documented for. A driver that fails to connect is torn down alone — closing
+  the shared tunnel would close it for the connection's other databases, and
+  permanently, since a closed Tunnel refuses to dial again.
 - `config.Connection` gained one field, `allow_write`, the per-connection half
   of the write gate. The TUI and the CLI ignore it.
 - Verified live against `postgres:16-alpine`: the tool surface, the row and

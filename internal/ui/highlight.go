@@ -3,9 +3,11 @@ package ui
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/andreim/d9s/internal/config"
@@ -22,36 +24,31 @@ const (
 	// sideways instead of wrapping, and the widget's cursor movement has to
 	// agree with what is on screen, so it is told lines never wrap.
 	noWrapWidth = 1 << 16
+	// highlightLookback is how far above the visible window the editor lexes,
+	// so a string or a comment opened just above it still colours the rows on
+	// screen correctly. It bounds the work a huge buffer costs per frame; only
+	// a literal longer than this would be mistaken for code.
+	highlightLookback = 8 << 10
 )
 
 // --- statement scope --------------------------------------------------------
 
-// statementSpan is the statement holding the cursor: the byte range it covers
-// in the buffer and the tokens inside it.
-type statementSpan struct {
-	start, end int
-	toks       []db.Token
-}
-
 // statementAt cuts a buffer's tokens at the top-level semicolons around the
-// cursor and returns the statement holding it. size is the buffer length, so a
-// last statement without a closing semicolon still has an end.
-func statementAt(toks []db.Token, cursor, size int) statementSpan {
-	span := statementSpan{end: size}
+// cursor and returns the tokens of the statement holding it.
+func statementAt(toks []db.Token, cursor int) []db.Token {
 	first, last := 0, len(toks)
 	for i, t := range toks {
 		if !isPunct(t, ";") {
 			continue
 		}
 		if t.End <= cursor {
-			span.start, first = t.End, i+1
+			first = i + 1
 			continue
 		}
-		span.end, last = t.Start, i
+		last = i
 		break
 	}
-	span.toks = toks[first:last]
-	return span
+	return toks[first:last]
 }
 
 // codeTokens drops the comments, leaving what the engine would actually run.
@@ -88,38 +85,32 @@ func lineBounds(s string, offset int) (start, end int) {
 	return start, end
 }
 
-// rowOf is the zero-based buffer row the byte offset falls on.
-func rowOf(s string, offset int) int {
-	return strings.Count(s[:min(max(offset, 0), len(s))], "\n")
-}
-
-// statementRows returns the first and last row of the statement the cursor sits
-// in — the one a run starts from — and whether there is one to mark. SQL
-// statements run between top-level semicolons and a Redis command is one line;
-// rows carrying only blanks or comments belong to no statement.
-func statementRows(engine config.EngineType, buf string, cursor int) (first, last int, ok bool) {
-	code := statementCode(engine, buf, cursor)
+// statementBounds returns the byte range a run would send for the statement the
+// cursor sits in, and whether there is one at all. SQL statements run between
+// top-level semicolons and a Redis command is one line; a cursor in blank space
+// or in a comment belongs to no statement.
+func statementBounds(toks []db.Token, engine config.EngineType, buf string, cursor int) (start, end int, ok bool) {
+	code := statementCode(toks, engine, buf, cursor)
 	if len(code) == 0 && cursor > 0 {
 		// The cursor rests just past a closing semicolon with nothing typed
 		// after it; the statement it closed is still the one in view.
-		code = statementCode(engine, buf, cursor-1)
+		code = statementCode(toks, engine, buf, cursor-1)
 	}
 	if len(code) == 0 {
 		return 0, 0, false
 	}
-	return rowOf(buf, code[0].Start), rowOf(buf, code[len(code)-1].End-1), true
+	return code[0].Start, code[len(code)-1].End, true
 }
 
 // statementCode returns the tokens a run would send for the statement at the
 // cursor: for SQL what sits between the surrounding top-level semicolons, for
 // Redis the command line the cursor is on, comments excluded either way.
-func statementCode(engine config.EngineType, buf string, cursor int) []db.Token {
-	toks := db.Tokenize(engine, buf)
+func statementCode(toks []db.Token, engine config.EngineType, buf string, cursor int) []db.Token {
 	if engine == config.Redis {
 		start, end := lineBounds(buf, cursor)
 		toks = tokensIn(toks, start, end)
 	} else {
-		toks = statementAt(toks, cursor, len(buf)).toks
+		toks = statementAt(toks, cursor)
 	}
 	return codeTokens(toks)
 }
@@ -145,13 +136,33 @@ type highlightSpan struct {
 	kind       spanKind
 }
 
-// highlightSpans returns the coloured runs of buf between the from and to byte
-// offsets, in order and without gaps, so a renderer can walk them and lose no
-// text. The whole buffer is lexed, because a string or a comment opened above
-// the window still decides its colour, but only the window becomes spans.
-func highlightSpans(engine config.EngineType, buf string, from, to int) []highlightSpan {
+// tokenizeWindow lexes the part of the buffer the editor is about to draw: from
+// a bounded look-back before the window, so a string or a comment opened just
+// above it is still recognised, to the end of the window. Its cost does not
+// grow with the buffer below or far above the screen.
+func tokenizeWindow(engine config.EngineType, buf string, from, to int) []db.Token {
 	from = min(max(from, 0), len(buf))
 	to = min(max(to, from), len(buf))
+	start := lineStartBefore(buf, max(from-highlightLookback, 0))
+	toks := db.Tokenize(engine, buf[start:to])
+	for i := range toks {
+		toks[i].Start += start
+		toks[i].End += start
+	}
+	return toks
+}
+
+// lineStartBefore is the offset of the first byte of the line the offset is on.
+func lineStartBefore(buf string, offset int) int {
+	return strings.LastIndexByte(buf[:min(max(offset, 0), len(buf))], '\n') + 1
+}
+
+// spansIn returns the coloured runs between the from and to byte offsets, in
+// order and without gaps, so a renderer can walk them and lose no text.
+func spansIn(toks []db.Token, from, to int) []highlightSpan {
+	if to < from {
+		to = from
+	}
 	var out []highlightSpan
 	at := from
 	add := func(start, end int, kind spanKind) {
@@ -161,7 +172,7 @@ func highlightSpans(engine config.EngineType, buf string, from, to int) []highli
 		}
 		out = append(out, highlightSpan{start: start, end: end, kind: kind})
 	}
-	for _, t := range db.Tokenize(engine, buf) {
+	for _, t := range toks {
 		if t.End <= from {
 			continue
 		}
@@ -296,7 +307,7 @@ func (q *queryModel) editorView() string {
 	numWidth := len(strconv.Itoa(len(lines))) + 2
 	textWidth := max(width-gutterWidth-numWidth, minEditorText)
 
-	row, col := q.cursorRowCol()
+	row, col := cursorRowColIn(lines, q.ta.Line(), q.ta.LineInfo())
 	q.scrollEditor(row, col, height, textWidth)
 
 	if buf == "" && q.ta.Placeholder != "" {
@@ -309,8 +320,14 @@ func (q *queryModel) editorView() string {
 	if last := q.edTop + height; last < len(lines) {
 		to = starts[last]
 	}
-	spans := highlightSpans(q.engine, buf, from, to)
-	first, mark, marked := statementRows(q.engine, buf, offsetOf(starts, lines, row, col))
+	toks := tokenizeWindow(q.engine, buf, from, to)
+	spans := spansIn(toks, from, to)
+	// The rows of the statement a run starts from. An empty range — no last row
+	// to reach — marks nothing, which is what a cursor in blank space gets.
+	markFirst, markLast := 0, -1
+	if start, end, ok := statementBounds(toks, q.engine, buf, offsetOf(starts, lines, row, col)); ok {
+		markFirst, markLast = rowOfOffset(starts, start), rowOfOffset(starts, end-1)
+	}
 
 	var b strings.Builder
 	for i := range height {
@@ -323,7 +340,7 @@ func (q *queryModel) editorView() string {
 			continue
 		}
 		gutter := stGutter.Render("│")
-		if marked && line >= first && line <= mark {
+		if line >= markFirst && line <= markLast {
 			gutter = stGutterActive.Render("┃")
 		}
 		number := stLineNumber
@@ -408,12 +425,22 @@ func offsetOf(starts []int, lines []string, row, col int) int {
 	return starts[row] + len(string(runes[:min(col, len(runes))]))
 }
 
+// rowOfOffset is the row a byte offset falls on, given where each row starts.
+func rowOfOffset(starts []int, offset int) int {
+	i := sort.Search(len(starts), func(i int) bool { return starts[i] > offset })
+	return max(i-1, 0)
+}
+
 // cursorRowCol is the cursor's position as a buffer row and a rune column.
 func (q *queryModel) cursorRowCol() (row, col int) {
-	lines := strings.Split(q.ta.Value(), "\n")
-	row = min(max(q.ta.Line(), 0), len(lines)-1)
-	info := q.ta.LineInfo()
-	col = min(max(info.StartColumn+info.ColumnOffset, 0), len([]rune(lines[row])))
+	return cursorRowColIn(strings.Split(q.ta.Value(), "\n"), q.ta.Line(), q.ta.LineInfo())
+}
+
+// cursorRowColIn places the widget's cursor in a buffer already split into
+// lines, so a render that has them need not split again.
+func cursorRowColIn(lines []string, row int, info textarea.LineInfo) (int, int) {
+	row = min(max(row, 0), len(lines)-1)
+	col := min(max(info.StartColumn+info.ColumnOffset, 0), len([]rune(lines[row])))
 	return row, col
 }
 

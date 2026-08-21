@@ -59,7 +59,9 @@ func Describe(args []string) int { return run("describe", args, osEnv()) }
 // Query runs SQL taken from an argument, a file, or stdin.
 func Query(args []string) int { return run("query", args, osEnv()) }
 
-// Names returns the subcommand names in the order they should be listed.
+// Names returns the subcommands this package implements, in the order they
+// should be listed. Commands served from elsewhere, such as the MCP server,
+// are absent from it but still carry a Synopsis and a Summary.
 func Names() []string { return []string{"connections", "databases", "tables", "describe", "query"} }
 
 // env is the process environment a command reads and writes, injected so the

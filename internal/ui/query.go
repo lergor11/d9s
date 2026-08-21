@@ -64,6 +64,14 @@ type queryModel struct {
 	// Schema panel state; schema.open = false means the panel is closed.
 	schema schemaModel
 
+	// How the focused result is being read, and the full-screen view of one of
+	// its cells; inspect.open = false means no cell is open.
+	grid    gridModel
+	inspect inspectModel
+
+	// Saved-query browser; saved.open = false means it is closed.
+	saved savedModel
+
 	// Tab completion: the popup state and the session's name cache, which is
 	// filled in the background on the first completion that needs it.
 	comp  completionModel
@@ -104,7 +112,10 @@ func (q *queryModel) open(driver db.Driver, engine config.EngineType, connName, 
 	q.cancelled = false
 	q.closeHistory()
 	q.closeSchema()
+	q.closeSaved()
 	q.comp.close()
+	q.grid.reset()
+	q.inspect = inspectModel{}
 	q.cache = schema.New(driver)
 }
 
@@ -132,13 +143,15 @@ func (q *queryModel) close() {
 }
 
 func (q *queryModel) editorFocused() bool {
-	return !q.focusResults && q.confirm == nil && !q.histOpen && !q.schema.open && !q.exportPrompt
+	return !q.focusResults && q.confirm == nil && !q.histOpen && !q.schema.open &&
+		!q.exportPrompt && !q.saved.open && !q.inspect.open
 }
 
 // capturesKeys reports whether the query view consumes every key press, which
 // leaves no global single-key shortcut (such as '?') active.
 func (q *queryModel) capturesKeys() bool {
-	return q.editorFocused() || q.confirm != nil || q.histOpen || q.schema.open || q.exportPrompt
+	return q.editorFocused() || q.confirm != nil || q.histOpen || q.schema.open ||
+		q.exportPrompt || q.saved.open || q.inspect.open || q.grid.filtering
 }
 
 func (q *queryModel) layout(width, bodyHeight int) {
@@ -179,8 +192,7 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	// The export prompt, the history overlay and the schema panel each take
-	// every key while they are showing.
+	// The prompts, overlays and panels each take every key while they show.
 	if q.exportPrompt {
 		return m.updateExportPrompt(msg)
 	}
@@ -190,10 +202,22 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 	if q.schema.open {
 		return m.updateSchema(msg)
 	}
+	if q.saved.open {
+		return m.updateSaved(msg)
+	}
+	if q.inspect.open {
+		return m.updateInspect(msg)
+	}
 
 	// The completion popup takes the keys that drive it; the rest fall through
 	// to the editor, which narrows the list as the name grows.
 	if q.comp.open && m.updateCompletion(msg) {
+		return nil
+	}
+
+	// With the results focused the grid takes the movement keys, so the cell
+	// cursor answers to j/k/h/l before anything else looks at them.
+	if q.focusResults && m.updateGrid(msg) {
 		return nil
 	}
 
@@ -204,6 +228,8 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 		return m.openHistory()
 	case "ctrl+s":
 		return m.openSchemaPanel()
+	case "ctrl+o":
+		return m.openSaved()
 	case "s":
 		// Bare letters are editor input; they act as commands only when the
 		// results pane has focus.
@@ -218,12 +244,12 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 		if q.focusResults {
 			return m.copyFocusedResult()
 		}
-	case "j":
+	case "n":
 		if q.focusResults {
 			q.focusResult(1)
 			return nil
 		}
-	case "k":
+	case "N":
 		if q.focusResults {
 			q.focusResult(-1)
 			return nil
@@ -327,6 +353,7 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 	q.cancelled = false
 	q.results = nil
 	q.resSel = 0
+	q.grid.reset()
 	q.renderResults()
 	ch := make(chan db.Result, len(stmts))
 	q.ch = ch
@@ -371,6 +398,7 @@ func (m *model) handleExecMsg(msg tea.Msg) tea.Cmd {
 		if q.resSel >= len(q.results) {
 			q.resSel = len(q.results) - 1
 		}
+		q.rebuildGrid()
 		q.renderResults()
 		return waitExec(q.ch)
 	case execDoneMsg:
@@ -437,16 +465,21 @@ func (q *queryModel) resultsContent() string {
 		if q.focusResults && i == q.resSel {
 			cursor = stSelected.Render("> ")
 		}
+		active := q.focusResults && i == q.resSel
 		title := fmt.Sprintf("[%d] %s", i+1, clip(r.Statement, min(maxStmtWidth, w-8)))
-		section := cursor + stSection.Render(truncate(title, w-2)) + "\n" + resultBody(r)
+		if note := q.gridNote(r, active); note != "" {
+			title += " · " + note
+		}
+		section := cursor + stSection.Render(truncate(title, w-2)) + "\n" + q.resultBody(r, active, w)
 		b.WriteString(section)
 		line += strings.Count(section, "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// resultBody renders everything below a statement's title line.
-func resultBody(r db.Result) string {
+// resultBody renders everything below a statement's title line. The focused
+// result — active — is the one the grid's sort, filter and cell cursor apply to.
+func (q *queryModel) resultBody(r db.Result, active bool, width int) string {
 	switch {
 	case r.Skipped:
 		return stDim.Render("skipped") + "\n"
@@ -454,7 +487,7 @@ func resultBody(r db.Result) string {
 		return stErr.Render(r.Err.Error()) + "\n" +
 			stDim.Render(r.Duration.Round(time.Millisecond).String()) + "\n"
 	case len(r.Columns) > 0:
-		return renderTable(r.Columns, r.Rows) +
+		return q.renderGrid(r, active, width) +
 			stDim.Render(fmt.Sprintf("%d row(s) in %s", len(r.Rows), r.Duration.Round(time.Millisecond))) + "\n"
 	default:
 		affected := "OK"
@@ -479,55 +512,14 @@ func (q *queryModel) focusResult(delta int) {
 		sel = 0
 	}
 	q.resSel = sel
+	q.grid.reset()
+	q.rebuildGrid()
 	q.renderResults()
 	if sel < len(q.resOffsets) {
 		q.vp.SetYOffset(q.resOffsets[sel])
 	}
 }
 
-func renderTable(cols []string, rows [][]string) string {
-	widths := make([]int, len(cols))
-	for i, c := range cols {
-		widths[i] = len([]rune(clip(c, maxColWidth)))
-	}
-	for _, row := range rows {
-		for i, cell := range row {
-			if i >= len(widths) {
-				break
-			}
-			if n := len([]rune(clip(cell, maxColWidth))); n > widths[i] {
-				widths[i] = n
-			}
-		}
-	}
-	var b strings.Builder
-	head := make([]string, len(cols))
-	for i, c := range cols {
-		head[i] = pad(clip(c, maxColWidth), widths[i])
-	}
-	b.WriteString(stTableHead.Render(strings.Join(head, " │ ")) + "\n")
-	sep := make([]string, len(cols))
-	for i := range cols {
-		sep[i] = strings.Repeat("─", widths[i])
-	}
-	b.WriteString(stDim.Render(strings.Join(sep, "─┼─")) + "\n")
-	for _, row := range rows {
-		cells := make([]string, len(cols))
-		for i := range cols {
-			cell := ""
-			if i < len(row) {
-				cell = row[i]
-			}
-			cells[i] = pad(clip(cell, maxColWidth), widths[i])
-		}
-		b.WriteString(strings.Join(cells, " │ ") + "\n")
-	}
-	return b.String()
-}
-
-// view renders the editor above the results. An open completion popup takes
-// the top of the results area rather than the middle of the screen, so the
-// editor and the cursor it is completing stay visible.
 func (q *queryModel) view(spin string) string {
 	divider := " editor "
 	if q.focusResults {

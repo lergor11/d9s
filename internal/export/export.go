@@ -134,6 +134,10 @@ var clipboardCommands = [][]string{
 // ErrNoClipboard reports that no supported clipboard tool is installed.
 var ErrNoClipboard = errors.New("no clipboard tool found (install pbcopy, wl-copy, xclip, or xsel)")
 
+// CopyText places text on the system clipboard verbatim, for a caller copying
+// one value rather than a result set.
+func CopyText(text string) error { return copyText(text) }
+
 // Copy places the result on the system clipboard as CSV.
 func Copy(res db.Result) error {
 	var buf strings.Builder

@@ -41,6 +41,10 @@ const clickHouseHTTPPort = 8123
 // that does not set `connect_timeout`.
 const DefaultConnectTimeout = 10 * time.Second
 
+// DefaultResultCap is how many rows one statement loads before a result is
+// reported truncated, when the connection does not set `result_cap`.
+const DefaultResultCap = 10000
+
 // Protocol selects the wire protocol of a ClickHouse connection.
 type Protocol string
 
@@ -127,6 +131,10 @@ type Connection struct {
 	// Written as a duration, e.g. `connect_timeout: 30s`.
 	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 
+	// ResultCap is how many rows one statement loads before the result is
+	// reported truncated; 0 uses DefaultResultCap.
+	ResultCap int `yaml:"result_cap"`
+
 	// Protocol selects the ClickHouse transport; ignored by other engines.
 	Protocol Protocol `yaml:"protocol"`
 
@@ -169,6 +177,15 @@ func (c *Connection) EffectiveConnectTimeout() time.Duration {
 		return c.ConnectTimeout
 	}
 	return DefaultConnectTimeout
+}
+
+// EffectiveResultCap returns the configured row cap, or the default when it is
+// unset or not a usable count.
+func (c *Connection) EffectiveResultCap() int {
+	if c.ResultCap > 0 {
+		return c.ResultCap
+	}
+	return DefaultResultCap
 }
 
 // EffectiveProtocol returns the ClickHouse transport, defaulting to native.

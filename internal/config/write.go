@@ -105,16 +105,18 @@ func (f *File) Add(conn Connection) error {
 // ErrNotFound when name is not in the file, or ErrExists when the new name
 // belongs to a different connection.
 func (f *File) Update(name string, conn Connection) error {
-	if err := normalize(&conn); err != nil {
-		return err
-	}
 	existing, _, err := f.Connections()
 	if err != nil {
 		return err
 	}
+	// Report a missing target before complaining about the payload: the caller
+	// is editing something that is not there, which is the more useful error.
 	i := indexByName(existing, name)
 	if i < 0 {
 		return fmt.Errorf("updating connection %q: %w", name, ErrNotFound)
+	}
+	if err := normalize(&conn); err != nil {
+		return err
 	}
 	if j := indexByName(existing, conn.Name); j >= 0 && j != i {
 		return fmt.Errorf("renaming connection %q to %q: %w", name, conn.Name, ErrExists)
@@ -409,9 +411,13 @@ func (f *File) insertItem(block []string) ([]string, error) {
 		return nil, err
 	}
 	if seq != nil && len(seq.Content) > 0 {
-		_, end, err := f.itemSpan(len(seq.Content) - 1)
+		last := len(seq.Content) - 1
+		start, end, err := f.itemSpan(last)
 		if err != nil {
 			return nil, err
+		}
+		if f.blankSeparated(start) {
+			block = append([]string{""}, block...)
 		}
 		return splice(f.lines, end+1, end, block), nil
 	}
@@ -423,6 +429,14 @@ func (f *File) insertItem(block []string) ([]string, error) {
 	}
 	lines := trimTrailingBlanks(f.lines)
 	return append(append(lines, "connections:"), block...), nil
+}
+
+// blankSeparated reports whether the item starting at start is set off from
+// the one before it by a blank line, so an appended entry can be spaced the
+// same way the file already spaces them.
+func (f *File) blankSeparated(start int) bool {
+	above := f.headStart(start) - 1
+	return above >= 1 && above <= len(f.lines) && strings.TrimSpace(f.lines[above-1]) == ""
 }
 
 // keyLine returns the 1-based line of a top-level key.

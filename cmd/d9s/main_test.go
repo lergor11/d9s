@@ -14,9 +14,15 @@ func TestEveryCommandIsRegistered(t *testing.T) {
 			t.Errorf("subcommand %q is implemented but not dispatched", name)
 		}
 	}
+	// Every dispatched command needs help metadata, or --help lists it with a
+	// blank description.
+	summaries := cli.Summaries()
 	for name := range subcommands {
 		if cli.Synopsis(name) == "" {
 			t.Errorf("subcommand %q is dispatched but has no synopsis", name)
+		}
+		if summaries[name] == "" {
+			t.Errorf("subcommand %q is dispatched but has no summary", name)
 		}
 	}
 }

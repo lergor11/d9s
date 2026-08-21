@@ -54,9 +54,9 @@ type Options struct {
 	Stdout io.WriteCloser
 	Stderr io.Writer
 
-	// open substitutes the connect sequence, so tests can drive the tools
+	// connector substitutes the connect sequence, so tests can drive the tools
 	// against a fake driver.
-	open openFunc
+	connector connector
 }
 
 // Server exposes a set of configured connections over MCP.
@@ -101,9 +101,9 @@ func New(opts Options) (*Server, error) {
 		byName[conn.Name] = conn
 	}
 
-	open := opts.open
-	if open == nil {
-		open = (&liveOpener{resolver: &recordingResolver{inner: secrets.NewResolver(), red: red}}).open
+	conn := opts.connector
+	if conn == nil {
+		conn = newLiveOpener(&recordingResolver{inner: secrets.NewResolver(), red: red})
 	}
 	version := opts.Version
 	if version == "" {
@@ -114,7 +114,7 @@ func New(opts Options) (*Server, error) {
 		byName:     byName,
 		allowWrite: opts.AllowWrite,
 		version:    version,
-		pool:       newPool(open),
+		pool:       newPool(conn),
 		red:        red,
 		log:        slog.New(slog.NewTextHandler(&redactWriter{w: stderr, red: red}, &slog.HandlerOptions{Level: slog.LevelInfo})),
 		in:         in,

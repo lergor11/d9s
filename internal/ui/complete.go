@@ -97,7 +97,7 @@ func completionRequestAt(engine config.EngineType, buf string, cursor int) compl
 	// Only the statement holding the cursor names the tables in scope; a name
 	// in an earlier statement of the buffer has nothing to do with here, and a
 	// comment names nothing at all.
-	toks := codeTokens(statementAt(db.Tokenize(engine, buf), cursor, len(buf)).toks)
+	toks := codeTokens(statementAt(db.Tokenize(engine, buf), cursor))
 
 	// The clause is read from the tokens before the whole name, qualifier
 	// included, so `FROM analytics.` still reads as a table position.

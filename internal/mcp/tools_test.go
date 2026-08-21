@@ -191,7 +191,9 @@ func TestQueryTruncatesLargeResults(t *testing.T) {
 	if got := strings.Count(text, "\n"); got > MaxRows+10 {
 		t.Errorf("response carries %d lines, want at most the %d-row cap plus headings", got, MaxRows)
 	}
-	for _, want := range []string{"Truncated by", "200-row cap", fmt.Sprintf("200 of %d rows shown", total)} {
+	// The total is deliberately absent: the cursor stops at the cap, so
+	// counting the rest would mean reading what the cap exists to avoid.
+	for _, want := range []string{"Truncated by", "200-row cap", "200 rows shown and more remain"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the truncation notice is missing %q:\n%s", want, tail(text))
 		}

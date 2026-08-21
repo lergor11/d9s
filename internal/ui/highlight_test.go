@@ -10,7 +10,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/andreim/d9s/internal/config"
+	"github.com/andreim/d9s/internal/db"
 )
+
+// rowOf is the zero-based buffer row a byte offset falls on. The editor itself
+// works from the line table it already has; a test can afford to count.
+func rowOf(s string, offset int) int {
+	return strings.Count(s[:min(max(offset, 0), len(s))], "\n")
+}
 
 // renderSpans describes spans the way the tests spell them out: kind and text.
 func renderSpans(buf string, spans []highlightSpan) []string {
@@ -106,7 +113,7 @@ func TestHighlightSpans(t *testing.T) {
 			if engine == "" {
 				engine = config.Postgres
 			}
-			spans := highlightSpans(engine, tt.buf, 0, len(tt.buf))
+			spans := spansIn(db.Tokenize(engine, tt.buf), 0, len(tt.buf))
 			if got := renderSpans(tt.buf, spans); !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("spans = %#v, want %#v", got, tt.want)
 			}
@@ -133,7 +140,7 @@ func TestHighlightSpansWindow(t *testing.T) {
 	from := strings.Index(buf, "SELECT 'x'")
 	to := from + len("SELECT 'x';")
 
-	spans := highlightSpans(config.Postgres, buf, from, to)
+	spans := spansIn(db.Tokenize(config.Postgres, buf), from, to)
 	want := []string{"keyword:SELECT", "plain: ", "string:'x'", "plain:;"}
 	if got := renderSpans(buf, spans); !reflect.DeepEqual(got, want) {
 		t.Errorf("windowed spans = %#v, want %#v", got, want)
@@ -148,7 +155,7 @@ func TestHighlightSpansWindowInsideAString(t *testing.T) {
 	// come from lexing the whole buffer, not from the window alone.
 	const buf = "SELECT 'a\nb' FROM t"
 	from := strings.Index(buf, "b'")
-	spans := highlightSpans(config.Postgres, buf, from, len(buf))
+	spans := spansIn(tokenizeWindow(config.Postgres, buf, from, len(buf)), from, len(buf))
 	want := []string{"string:b'", "plain: ", "keyword:FROM", "plain: t"}
 	if got := renderSpans(buf, spans); !reflect.DeepEqual(got, want) {
 		t.Errorf("spans = %#v, want %#v", got, want)
@@ -272,7 +279,8 @@ func TestStatementRows(t *testing.T) {
 			if engine == "" {
 				engine = config.Postgres
 			}
-			first, last, ok := statementRows(engine, tt.buf, tt.cursor)
+			start, end, ok := statementBounds(db.Tokenize(engine, tt.buf), engine, tt.buf, tt.cursor)
+			first, last := rowOf(tt.buf, start), rowOf(tt.buf, max(end-1, 0))
 			if ok != tt.ok {
 				t.Fatalf("marked = %v, want %v", ok, tt.ok)
 			}
@@ -361,8 +369,9 @@ func TestEditorViewHighlightSurvivesEditing(t *testing.T) {
 	}
 
 	// The colours follow the edit: what was a keyword is one no longer.
-	spans := highlightSpans(config.Postgres, "SELECT id FROM users2;", 0, 22)
-	if got := renderSpans("SELECT id FROM users2;", spans); got[0] != "keyword:SELECT" {
+	const edited = "SELECT id FROM users2;"
+	spans := spansIn(db.Tokenize(config.Postgres, edited), 0, len(edited))
+	if got := renderSpans(edited, spans); got[0] != "keyword:SELECT" {
 		t.Errorf("spans = %#v, want SELECT still a keyword", got)
 	}
 	press(m, "backspace", "backspace", "backspace", "backspace", "backspace", "backspace", "backspace")
@@ -484,3 +493,30 @@ func TestSyntaxStylesAreDistinct(t *testing.T) {
 
 // colourKey renders a lipgloss colour as the value it was declared with.
 func colourKey(c lipgloss.TerminalColor) string { return fmt.Sprint(c) }
+
+// benchBuffer is a script of n identical statements, each holding a keyword, a
+// name, a string, a number and a comment.
+func benchBuffer(n int) string {
+	var b strings.Builder
+	for range n {
+		b.WriteString("SELECT id, email, 'note' FROM users WHERE id = 42 -- why\n")
+	}
+	return b.String()
+}
+
+// BenchmarkEditorView measures one frame of the editor. The cost must stay flat
+// as the buffer grows, because only the visible window is lexed and styled.
+func BenchmarkEditorView(b *testing.B) {
+	for _, lines := range []int{20, 100, 1000, 10000} {
+		b.Run(strconv.Itoa(lines)+"lines", func(b *testing.B) {
+			m := &model{view: viewQuery, activeConn: -1}
+			m.query.open(&fakeDriver{}, config.Postgres, "conn", "app")
+			m.query.layout(100, 30)
+			m.query.ta.SetValue(benchBuffer(lines))
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = m.query.editorView()
+			}
+		})
+	}
+}

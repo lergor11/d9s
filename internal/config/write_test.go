@@ -58,16 +58,6 @@ connections:
     user: postgres
 `
 
-// writeConfig puts body in a temporary file and returns its path.
-func writeConfig(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	return path
-}
-
 // entryOf returns the lines of the named connection, from its "- name:" line
 // through the last line indented under it.
 func entryOf(t *testing.T, body, name string) string {
@@ -426,13 +416,62 @@ func TestAddPreservesTheRestOfTheFile(t *testing.T) {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
 	got := string(raw)
-	if !strings.HasPrefix(got, richConfig[:strings.Index(richConfig, "  - name: local-pg")]) {
-		t.Errorf("the file above the new entry changed:\n%s", got)
+	header := "# d9s connections\n# Checked into dotfiles; keep the comments.\n\nconnections:\n"
+	if !strings.HasPrefix(got, header) {
+		t.Errorf("the header above the entries changed:\n%s", got)
 	}
 	for _, name := range []string{"prod-pg", "analytics-ch", "cache-redis", "local-pg"} {
 		if before, now := entryOf(t, richConfig, name), entryOf(t, got, name); before != now {
 			t.Errorf("connection %q changed:\n--- before ---\n%s\n--- after ---\n%s", name, before, now)
 		}
+	}
+}
+
+// TestAddMatchesTheFileSpacing checks an appended entry is spaced the way the
+// file already spaces its entries, in both directions.
+func TestAddMatchesTheFileSpacing(t *testing.T) {
+	const packed = `connections:
+  - name: one
+    type: postgres
+    host: a
+  - name: two
+    type: postgres
+    host: b
+`
+	tests := []struct {
+		name      string
+		src       string
+		wantBlank bool
+	}{
+		{name: "blank separated file keeps the blank", src: richConfig, wantBlank: true},
+		{name: "packed file stays packed", src: packed, wantBlank: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, tt.src)
+			if err := AddConnection(path, Connection{Name: "added", Type: Postgres, Host: "db.new"}); err != nil {
+				t.Fatalf("AddConnection() error = %v", err)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("ReadFile() error = %v", err)
+			}
+			lines := strings.Split(string(raw), "\n")
+			at := -1
+			for i, line := range lines {
+				if strings.Contains(line, "- name: added") {
+					at = i
+					break
+				}
+			}
+			if at < 1 {
+				t.Fatalf("added entry not found:\n%s", raw)
+			}
+			gotBlank := strings.TrimSpace(lines[at-1]) == ""
+			if gotBlank != tt.wantBlank {
+				t.Errorf("blank line before the new entry = %v, want %v:\n%s", gotBlank, tt.wantBlank, raw)
+			}
+		})
 	}
 }
 

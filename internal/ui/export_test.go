@@ -80,9 +80,9 @@ func TestExportPromptDefaultsToFocusedResult(t *testing.T) {
 		want string
 	}{
 		{name: "first result", want: "./results-1.csv"},
-		{name: "after j", keys: []string{"j"}, want: "./results-2.csv"},
-		{name: "j past the end clamps", keys: []string{"j", "j", "j"}, want: "./results-2.csv"},
-		{name: "j then k returns", keys: []string{"j", "k"}, want: "./results-1.csv"},
+		{name: "after n", keys: []string{"n"}, want: "./results-2.csv"},
+		{name: "n past the end clamps", keys: []string{"n", "n", "n"}, want: "./results-2.csv"},
+		{name: "n then N returns", keys: []string{"n", "N"}, want: "./results-1.csv"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -117,7 +117,7 @@ func TestExportWritesFocusedResult(t *testing.T) {
 		},
 		{
 			name:     "second result as csv",
-			move:     []string{"j"},
+			move:     []string{"n"},
 			file:     "second.csv",
 			wantHead: "count",
 			wantRows: 1,
@@ -312,7 +312,7 @@ func TestExportKeysNeedResultsFocus(t *testing.T) {
 // running it — executing it would spawn pbcopy and clobber the real clipboard.
 func TestCopyBuildsCommand(t *testing.T) {
 	m := newResultsModel(t, sampleResults())
-	m.updateQuery(key("j"))
+	m.updateQuery(key("n"))
 	if cmd := m.updateQuery(key("y")); cmd == nil {
 		t.Fatal("`y` returned no clipboard command")
 	}
@@ -371,7 +371,7 @@ func TestResultSelectionRendering(t *testing.T) {
 	if !strings.HasPrefix(first, "> ") {
 		t.Errorf("first section is not marked as focused: %q", first)
 	}
-	m.updateQuery(key("j"))
+	m.updateQuery(key("n"))
 	lines := strings.Split(m.query.resultsContent(), "\n")
 	if strings.HasPrefix(lines[0], "> ") {
 		t.Errorf("first section still marked after moving down: %q", lines[0])
@@ -397,7 +397,7 @@ func TestResultSelectionSurvivesStreaming(t *testing.T) {
 		t.Errorf("selection = %d, want it to stay on the first statement", got)
 	}
 
-	m.updateQuery(key("j"))
+	m.updateQuery(key("n"))
 	if got := m.query.resSel; got != 1 {
 		t.Fatalf("selection = %d, want 1", got)
 	}

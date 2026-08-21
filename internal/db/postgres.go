@@ -18,7 +18,8 @@ func init() {
 }
 
 type postgresDriver struct {
-	conn *pgx.Conn
+	conn      *pgx.Conn
+	resultCap int
 }
 
 func (d *postgresDriver) Connect(ctx context.Context, t Target) error {
@@ -58,6 +59,7 @@ func (d *postgresDriver) Connect(ctx context.Context, t Target) error {
 		return connectFailed([]string{address(t.Config)}, err)
 	}
 	d.conn = conn
+	d.resultCap = t.Config.EffectiveResultCap()
 	return nil
 }
 
@@ -134,43 +136,68 @@ ORDER BY ordinal_position`
 	return cols, rows.Err()
 }
 
-func (d *postgresDriver) Execute(ctx context.Context, statement string) (res Result) {
-	res.Statement = statement
-	res.Affected = -1
-	start := time.Now()
-	defer func() { res.Duration = time.Since(start) }()
+func (d *postgresDriver) Execute(ctx context.Context, statement string) Result {
+	return executeViaCursor(ctx, d, statement)
+}
 
+// ExecuteStream runs a statement and returns a cursor over its rows, leaving
+// the pgx result open until the cursor is closed or ctx is cancelled.
+func (d *postgresDriver) ExecuteStream(ctx context.Context, statement string) (Cursor, error) {
 	rows, err := d.conn.Query(ctx, statement)
 	if err != nil {
-		res.Err = err
-		return res
+		return nil, err
 	}
-	defer rows.Close()
 	fds := rows.FieldDescriptions()
+	var columns []string
 	for _, fd := range fds {
-		res.Columns = append(res.Columns, fd.Name)
+		columns = append(columns, fd.Name)
 	}
-	for rows.Next() {
-		vals, err := rows.Values()
+	src := &pgSource{rows: rows, hasColumns: len(fds) > 0}
+	return newCursor(ctx, columns, d.resultCap, src), nil
+}
+
+// pgSource pages a pgx result.
+type pgSource struct {
+	rows       pgx.Rows
+	hasColumns bool
+}
+
+func (s *pgSource) fetch(n int) ([][]string, bool, error) {
+	out := make([][]string, 0, min(n, 1024))
+	for len(out) < n {
+		if !s.rows.Next() {
+			return out, true, s.rows.Err()
+		}
+		vals, err := s.rows.Values()
 		if err != nil {
-			res.Err = err
-			return res
+			return out, true, err
 		}
 		row := make([]string, len(vals))
 		for i, v := range vals {
 			row[i] = stringify(v)
 		}
-		res.Rows = append(res.Rows, row)
+		out = append(out, row)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		res.Err = err
-		return res
+	return out, false, nil
+}
+
+// release closes the pgx result. Close reports nothing itself; a failure that
+// ended the read has already come back from fetch through rows.Err.
+func (s *pgSource) release() error {
+	s.rows.Close()
+	return nil
+}
+
+// affected reads the command tag, which pgx only fills in once the rows are
+// closed, and which only a statement without a result set reports.
+func (s *pgSource) affected() int64 {
+	if s.hasColumns {
+		return -1
 	}
-	if tag := rows.CommandTag(); len(fds) == 0 && (tag.Insert() || tag.Update() || tag.Delete()) {
-		res.Affected = tag.RowsAffected()
+	if tag := s.rows.CommandTag(); tag.Insert() || tag.Update() || tag.Delete() {
+		return tag.RowsAffected()
 	}
-	return res
+	return -1
 }
 
 func (d *postgresDriver) Close() error {

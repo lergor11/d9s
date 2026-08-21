@@ -293,37 +293,44 @@ func ttlDetail(ctx context.Context, rdb redis.Cmdable, key string) string {
 	return "ttl " + ttl.Truncate(time.Second).String()
 }
 
-func (d *redisDriver) Execute(ctx context.Context, statement string) (res Result) {
-	res.Statement = statement
-	res.Affected = -1
-	res.Columns = []string{"reply"}
-	start := time.Now()
-	defer func() { res.Duration = time.Since(start) }()
+func (d *redisDriver) Execute(ctx context.Context, statement string) Result {
+	res := executeViaCursor(ctx, d, statement)
+	// The reply column names the shape of the output even when the command
+	// never produced one, which is what the one-shot path has always returned.
+	if len(res.Columns) == 0 {
+		res.Columns = []string{"reply"}
+	}
+	return res
+}
 
+// ExecuteStream runs one command and returns a cursor over its reply.
+//
+// Nothing is streamed here, and the cursor says so by handing the whole reply
+// back as a single page: Redis has no server-side cursor for a command reply,
+// so Do has already materialised the entire thing in memory before this
+// returns. Paging it would only spread out rows that have all been paid for
+// already, and capping it would hide rows without saving anything.
+func (d *redisDriver) ExecuteStream(ctx context.Context, statement string) (Cursor, error) {
 	fields, err := splitCommandLine(statement)
 	if err != nil {
-		res.Err = err
-		return res
+		return nil, err
 	}
 	if len(fields) == 0 {
-		res.Err = errors.New("empty command")
-		return res
+		return nil, errors.New("empty command")
 	}
 	args := make([]any, len(fields))
 	for i, f := range fields {
 		args[i] = f
 	}
+	columns := []string{"reply"}
 	val, err := d.rdb.Do(ctx, args...).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			res.Rows = [][]string{{"(nil)"}}
-			return res
+			return newRowCursor(columns, [][]string{{"(nil)"}}, -1), nil
 		}
-		res.Err = err
-		return res
+		return nil, err
 	}
-	res.Rows = redisReplyRows(val, "")
-	return res
+	return newRowCursor(columns, redisReplyRows(val, ""), -1), nil
 }
 
 // redisReplyRows flattens a reply into display rows, prefixing nested array

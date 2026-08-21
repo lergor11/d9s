@@ -73,7 +73,8 @@ func (d *fakeDriver) isClosed() bool {
 }
 
 // fakeOpener hands out one fakeDriver per connection and counts how often it
-// was asked to open, which is how session reuse is observed.
+// was asked to open, which is how session reuse is observed. It implements
+// connector.
 type fakeOpener struct {
 	mu      sync.Mutex
 	drivers map[string]*fakeDriver
@@ -81,6 +82,7 @@ type fakeOpener struct {
 	secret  string // registered with the redactor, as a real connect would
 	red     *redactor
 	err     error
+	closed  bool
 }
 
 func (o *fakeOpener) open(_ context.Context, conn config.Connection, database string) (*session, error) {
@@ -100,6 +102,13 @@ func (o *fakeOpener) open(_ context.Context, conn config.Connection, database st
 		o.drivers[key] = drv
 	}
 	return &session{driver: drv}, nil
+}
+
+func (o *fakeOpener) close() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.closed = true
+	return nil
 }
 
 // driver returns the driver the opener handed out for a connection's default
@@ -148,7 +157,7 @@ func newTestServer(t *testing.T, opts Options) (*Server, *fakeOpener) {
 	if opts.Config == nil {
 		opts.Config = testConfig()
 	}
-	opts.open = opener.open
+	opts.connector = opener
 	if opts.Stderr == nil {
 		opts.Stderr = io.Discard
 	}

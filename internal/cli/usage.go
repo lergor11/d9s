@@ -3,7 +3,8 @@ package cli
 import "strings"
 
 // Summaries describes each subcommand in one line, for the `d9s --help`
-// listing. The order matches Names.
+// listing. It also covers the subcommands implemented elsewhere, such as the
+// MCP server, so the one help listing describes every command d9s dispatches.
 func Summaries() map[string]string {
 	return map[string]string{
 		"connections": "list the configured connections",
@@ -11,6 +12,7 @@ func Summaries() map[string]string {
 		"tables":      "list the tables of a database",
 		"describe":    "list the columns of a table",
 		"query":       "run SQL from an argument, a file, or stdin",
+		"mcp":         "serve the connections over MCP, on stdio",
 	}
 }
 
@@ -21,6 +23,7 @@ var synopsis = map[string]string{
 	"tables":      "d9s tables <connection> [database]",
 	"describe":    "d9s describe <connection> <table>",
 	"query":       "d9s query <connection> [sql]",
+	"mcp":         "d9s mcp",
 }
 
 // Synopsis returns the argument line of one subcommand, for the top-level

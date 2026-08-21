@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -134,6 +135,189 @@ func TestPostgresLive(t *testing.T) {
 	if cols[1].Name != "note" || !cols[1].Nullable || cols[1].Detail == "" {
 		t.Errorf("second column = %+v, want a nullable note carrying its default", cols[1])
 	}
+}
+
+// TestPostgresPagingLive pages a 100k-row table, which is the case that used
+// to buffer the whole thing before anything appeared. It runs against the same
+// container as TestPostgresLive:
+//
+//	D9S_IT_PG_PORT=15432 D9S_IT_PG_PASSWORD=secret \
+//	  go test -tags integration -run TestPostgresPagingLive ./internal/db
+func TestPostgresPagingLive(t *testing.T) {
+	port := envPort(t, "D9S_IT_PG_PORT")
+	const rows = 100000
+	conn := config.Connection{
+		Name: "it-pg-paging", Type: config.Postgres, Host: "127.0.0.1", Port: port,
+		User: "postgres", Database: "postgres",
+		TLS: plaintext,
+	}
+	drv := connect(t, Target{Config: conn, Password: os.Getenv("D9S_IT_PG_PASSWORD")})
+	ctx := context.Background()
+
+	const wide = `SELECT g AS id, repeat('x', 200) AS filler FROM generate_series(1, 100000) g`
+	streamer, ok := drv.(Streamer)
+	if !ok {
+		t.Fatal("the postgres driver does not implement Streamer")
+	}
+
+	t.Run("the first page arrives without reading the result", func(t *testing.T) {
+		start := time.Now()
+		cur, err := streamer.ExecuteStream(ctx, wide)
+		if err != nil {
+			t.Fatalf("ExecuteStream: %v", err)
+		}
+		defer func() { _ = cur.Close() }()
+
+		page, err := cur.NextPage(50)
+		firstPage := time.Since(start)
+		if err != nil {
+			t.Fatalf("NextPage: %v", err)
+		}
+		if len(page) != 50 {
+			t.Fatalf("first page has %d rows, want 50", len(page))
+		}
+		if page[0][0] != "1" {
+			t.Errorf("first row is %v, want it to start at 1", page[0])
+		}
+		if cur.Done() {
+			t.Error("cursor is done after one page of a 100k-row result")
+		}
+		// Reading all 100k rows takes far longer than this; the point is that
+		// the first page does not wait for them.
+		if firstPage > 5*time.Second {
+			t.Errorf("the first page took %v, which suggests the result was buffered", firstPage)
+		}
+		t.Logf("first page of 50 rows in %v", firstPage)
+	})
+
+	t.Run("the cap stops the read and reports truncation", func(t *testing.T) {
+		capped := conn
+		capped.ResultCap = 2500
+		cur, err := connectStreamer(t, capped).ExecuteStream(ctx, wide)
+		if err != nil {
+			t.Fatalf("ExecuteStream: %v", err)
+		}
+		defer func() { _ = cur.Close() }()
+
+		var loaded int
+		for !cur.Done() {
+			page, err := cur.NextPage(500)
+			if err != nil {
+				t.Fatalf("NextPage: %v", err)
+			}
+			loaded += len(page)
+		}
+		if loaded != capped.ResultCap {
+			t.Errorf("loaded %d rows, want to stop at the cap of %d", loaded, capped.ResultCap)
+		}
+		if !cur.Truncated() {
+			t.Error("a result stopped at the cap does not report itself truncated")
+		}
+
+		// The documented continuation: raise the cap and keep going.
+		cur.SetCap(capped.ResultCap + 500)
+		more, err := cur.NextPage(500)
+		if err != nil {
+			t.Fatalf("NextPage after raising the cap: %v", err)
+		}
+		if len(more) != 500 {
+			t.Errorf("continuing produced %d rows, want 500 more", len(more))
+		}
+	})
+
+	t.Run("closing early leaves the connection usable", func(t *testing.T) {
+		// An abandoned pgx result pins its connection, so the follow-up query
+		// is the real assertion here.
+		cur, err := streamer.ExecuteStream(ctx, wide)
+		if err != nil {
+			t.Fatalf("ExecuteStream: %v", err)
+		}
+		if _, err := cur.NextPage(10); err != nil {
+			t.Fatalf("NextPage: %v", err)
+		}
+		if err := cur.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		res := drv.Execute(ctx, "SELECT 42")
+		if res.Err != nil {
+			t.Fatalf("the connection is unusable after closing a cursor early: %v", res.Err)
+		}
+		if len(res.Rows) != 1 || res.Rows[0][0] != "42" {
+			t.Errorf("follow-up query returned %v, want [[42]]", res.Rows)
+		}
+	})
+
+	t.Run("cancelling releases the cursor", func(t *testing.T) {
+		// Cancelling aborts the query itself, and pgx tears the connection
+		// down with it rather than leave the protocol stream half-read. That
+		// is what a cancelled Execute has always done, so the session is
+		// spent either way; what matters here is that the cursor notices and
+		// lets go of the result instead of holding it open. Code that only
+		// wants to stop reading should Close the cursor, which keeps the
+		// session, as the subtest above shows.
+		own := connectStreamer(t, conn)
+		cancelCtx, cancel := context.WithCancel(ctx)
+		cur, err := own.ExecuteStream(cancelCtx, wide)
+		if err != nil {
+			t.Fatalf("ExecuteStream: %v", err)
+		}
+		if _, err := cur.NextPage(10); err != nil {
+			t.Fatalf("NextPage: %v", err)
+		}
+		cancel()
+
+		// The release runs on another goroutine; wait rather than race it.
+		deadline := time.Now().Add(10 * time.Second)
+		for !cur.Done() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !cur.Done() {
+			t.Fatal("the cursor is still open after its context was cancelled")
+		}
+		if _, err := cur.NextPage(10); !errors.Is(err, context.Canceled) {
+			t.Errorf("NextPage after cancellation = %v, want context.Canceled: an "+
+				"abandoned read must not look like a finished one", err)
+		}
+		// The driver this subtest opened is spent, but the one every other
+		// subtest shares was never touched.
+		if res := drv.Execute(ctx, "SELECT 43"); res.Err != nil {
+			t.Fatalf("an unrelated session broke: %v", res.Err)
+		}
+	})
+
+	t.Run("Execute still returns every row", func(t *testing.T) {
+		// The cap must not reach the one-shot path: the CLI, the MCP server
+		// and export all read whole results through it.
+		capped := conn
+		capped.ResultCap = 100
+		res := connectDriver(t, capped).Execute(ctx,
+			`SELECT g FROM generate_series(1, 100000) g`)
+		if res.Err != nil {
+			t.Fatalf("Execute: %v", res.Err)
+		}
+		if len(res.Rows) != rows {
+			t.Errorf("Execute returned %d rows, want all %d despite a cap of %d",
+				len(res.Rows), rows, capped.ResultCap)
+		}
+	})
+}
+
+// connectDriver opens a second session to the same target, for a case that
+// needs its own connection settings.
+func connectDriver(t *testing.T, conn config.Connection) Driver {
+	t.Helper()
+	return connect(t, Target{Config: conn, Password: os.Getenv("D9S_IT_PG_PASSWORD")})
+}
+
+// connectStreamer is connectDriver for a driver known to page.
+func connectStreamer(t *testing.T, conn config.Connection) Streamer {
+	t.Helper()
+	drv := connectDriver(t, conn)
+	s, ok := drv.(Streamer)
+	if !ok {
+		t.Fatalf("the %s driver does not implement Streamer", conn.Type)
+	}
+	return s
 }
 
 // TestPostgresSocketLive connects over a unix socket, with no tls block, so it

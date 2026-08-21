@@ -25,11 +25,15 @@ type Database struct {
 type Result struct {
 	Statement string
 	Columns   []string
-	Rows      [][]string
-	Affected  int64 // -1 when not applicable
-	Err       error
-	Skipped   bool // statement not run because a previous one failed / cancelled
-	Duration  time.Duration
+	// ColumnTypes are the engine's type names, positionally matching Columns.
+	// A driver that does not report them leaves this nil, and the interface
+	// shows the column names alone.
+	ColumnTypes []string
+	Rows        [][]string
+	Affected    int64 // -1 when not applicable
+	Err         error
+	Skipped     bool // statement not run because a previous one failed / cancelled
+	Duration    time.Duration
 }
 
 // Target identifies what to connect to: a configured connection plus resolved
