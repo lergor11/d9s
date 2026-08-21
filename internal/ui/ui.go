@@ -346,7 +346,7 @@ func (m *model) footerView() string {
 		case m.query.comp.open:
 			hints = completionHints
 		case m.query.editorFocused():
-			hints = "ctrl+r/F5 run · tab complete · ctrl+h history · ctrl+s schema · ctrl+j results · esc back"
+			hints = "ctrl+r run · tab complete · ctrl+h history · ctrl+s schema · ctrl+j results · esc back"
 		default:
 			hints = "j/k statement · e export · y copy · s schema · tab editor · esc back · ? help"
 		}
@@ -374,6 +374,7 @@ func (m *model) helpView() string {
 		write("esc", "back to connections")
 	case viewQuery:
 		write("ctrl+r, F5", "run buffer")
+		write("alt+enter", "run buffer (shift+enter, if your terminal maps it)")
 		write("ctrl+x", "cancel running query")
 		write("ctrl+h", "query history (enter inserts, never runs)")
 		write("s, ctrl+s", "schema panel (tables → enter → columns, i inserts)")

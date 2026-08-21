@@ -175,7 +175,7 @@ only.
 | `j`/`k`, arrows | Move |
 | `Enter` | Connect / open |
 | `Esc` | Back |
-| `Ctrl+R` / `F5` | Run buffer |
+| `Ctrl+R` / `F5` / `Alt+Enter` | Run buffer |
 | `Ctrl+X` | Cancel running query |
 | `Ctrl+H` | Query history (type to filter, `Enter` inserts without running) |
 | `s` / `Ctrl+S` | Schema panel (`Enter` drills into columns, `/` filters, `i` inserts a `SELECT`) |
@@ -186,6 +186,21 @@ only.
 | `Ctrl+J` | Toggle editor/results focus |
 | `?` | Help overlay |
 | `q` / `Ctrl+C` | Quit |
+
+### Shift+Enter to run
+
+Most terminals send a bare carriage return for Shift+Enter, indistinguishable
+from Enter, which the editor has to keep as a newline — so d9s cannot bind it
+directly. Map it in the terminal instead, to send `Ctrl+R` (`\x12`):
+
+```
+# Ghostty (~/.config/ghostty/config)
+keybind = shift+enter=text:\x12
+```
+
+Without a mapping Ghostty emits `\x1b[27;2;13~` for Shift+Enter, which lands in
+the editor as stray characters. `Alt+Enter` works everywhere with no terminal
+configuration.
 
 ## Scripting: the command line
 

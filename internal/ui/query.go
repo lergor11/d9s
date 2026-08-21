@@ -222,7 +222,9 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
-	case "ctrl+r", "f5":
+	// alt+enter is the closest a terminal reliably gets to shift+enter: most
+	// send a bare CR for shift+enter, which the editor must keep as a newline.
+	case "ctrl+r", "f5", "alt+enter":
 		return m.startRunOrConfirm()
 	case "ctrl+h":
 		return m.openHistory()

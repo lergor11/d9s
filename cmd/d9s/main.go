@@ -94,6 +94,7 @@ Configuration:
 Keys (press ? inside d9s for the bindings of the current view):
   j/k, arrows    move            enter   connect / open
   ctrl+r, F5     run buffer      esc     back one level
+  alt+enter      run buffer (see the README for shift+enter)
   ctrl+x         cancel query    ctrl+j  toggle editor/results focus
   tab            complete the name at the cursor (ctrl+g reloads names)
   ctrl+h         query history   s       schema panel
