@@ -15,4 +15,4 @@
 
 ## 4. Verification
 - [x] 4.1 `goreleaser release --snapshot --clean` succeeds locally
-- [ ] 4.2 `make lint test` green
+- [x] 4.2 `make lint test` green

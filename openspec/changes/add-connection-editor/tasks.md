@@ -20,7 +20,7 @@
 
 ## 3. Verification
 - [x] 3.1 Unit tests for form state and validation
-- [ ] 3.2 `make lint test` green
+- [x] 3.2 `make lint test` green
 
 ## Notes
 - The form is an overlay inside the connections view rather than a view of its

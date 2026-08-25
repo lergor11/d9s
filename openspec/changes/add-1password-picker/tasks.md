@@ -19,7 +19,7 @@
       — reference construction is covered in `internal/secrets`; picker state,
         filtering, step navigation, and every error kind in
         `internal/ui/picker_test.go`
-- [ ] 3.2 `make lint test` green
+- [x] 3.2 `make lint test` green
 
 ## Notes
 - The picker shows names only. No field value is ever fetched, so there is
