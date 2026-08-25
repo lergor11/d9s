@@ -168,6 +168,10 @@ func TestPostgresPagingLive(t *testing.T) {
 		}
 		defer func() { _ = cur.Close() }()
 
+		if types := cur.ColumnTypes(); len(types) != 2 || types[0] != "int4" || types[1] != "text" {
+			t.Errorf("ColumnTypes = %v, want [int4 text]", types)
+		}
+
 		page, err := cur.NextPage(50)
 		firstPage := time.Since(start)
 		if err != nil {

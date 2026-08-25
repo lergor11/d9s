@@ -148,11 +148,16 @@ func (d *postgresDriver) ExecuteStream(ctx context.Context, statement string) (C
 		return nil, err
 	}
 	fds := rows.FieldDescriptions()
-	var columns []string
+	var columns, types []string
 	for _, fd := range fds {
 		columns = append(columns, fd.Name)
+		name := ""
+		if t, ok := d.conn.TypeMap().TypeForOID(fd.DataTypeOID); ok {
+			name = t.Name
+		}
+		types = append(types, name)
 	}
-	src := &pgSource{rows: rows, hasColumns: len(fds) > 0}
+	src := &pgSource{rows: rows, hasColumns: len(fds) > 0, types: types}
 	return newCursor(ctx, columns, d.resultCap, src), nil
 }
 
@@ -160,7 +165,13 @@ func (d *postgresDriver) ExecuteStream(ctx context.Context, statement string) (C
 type pgSource struct {
 	rows       pgx.Rows
 	hasColumns bool
+	types      []string
 }
+
+// columnTypes reports postgres's own type names the way the catalog spells
+// them (int4, text, timestamptz); a column whose OID the type map does not
+// know is left blank rather than shown as a number.
+func (s *pgSource) columnTypes() []string { return s.types }
 
 func (s *pgSource) fetch(n int) ([][]string, bool, error) {
 	out := make([][]string, 0, min(n, 1024))
