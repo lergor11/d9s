@@ -386,7 +386,7 @@ func (m *model) connectionsHelp(write func(key, desc string)) {
 	write("", "")
 	write("in the form:", "")
 	write("tab, ↑/↓", "move between fields")
-	write("←/→", "change the engine")
+	write("←/→", "change the engine or the TLS mode")
 	write("enter, ctrl+s", "save to "+m.cfgPath)
 	write("ctrl+t", "test the connection without saving")
 	write("ctrl+p", "pick a password from 1Password")

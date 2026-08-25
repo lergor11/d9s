@@ -57,6 +57,7 @@ const (
 	fldUser
 	fldPassword
 	fldDatabase
+	fldTLS
 	fldSSHBastion
 	fldSSHUser
 	fldSSHPort
@@ -76,11 +77,15 @@ var formFields = [fieldCount]formField{
 	fldType: {label: "Engine", choices: []string{
 		string(config.Postgres), string(config.ClickHouse), string(config.Redis),
 	}},
-	fldHost:       {label: "Host", hint: "host, IP, or a /path unix socket (postgres only)"},
-	fldPort:       {label: "Port", hint: "blank uses the engine default"},
-	fldUser:       {label: "User"},
-	fldPassword:   {label: "Password", hint: "op://vault/item/field, ${ENV_VAR}, or a literal"},
-	fldDatabase:   {label: "Database", hint: "optional"},
+	fldHost:     {label: "Host", hint: "host, IP, or a /path unix socket (postgres only)"},
+	fldPort:     {label: "Port", hint: "blank uses the engine default"},
+	fldUser:     {label: "User"},
+	fldPassword: {label: "Password", hint: "op://vault/item/field, ${ENV_VAR}, or a literal"},
+	fldDatabase: {label: "Database", hint: "optional"},
+	fldTLS: {label: "TLS", choices: []string{
+		tlsDefaultChoice, string(config.TLSDisable), string(config.TLSRequire),
+		string(config.TLSVerifyCA), string(config.TLSVerifyFull),
+	}, hint: "default is off behind a bastion or a unix socket, require otherwise"},
 	fldSSHBastion: {label: "SSH bastion", hint: "optional; blank means a direct connection"},
 	fldSSHUser:    {label: "SSH user", hint: "key comes from the 1Password SSH agent"},
 	fldSSHPort:    {label: "SSH port", hint: "blank uses 22"},
@@ -143,6 +148,7 @@ type connEditor struct {
 func newConnForm() *connForm {
 	f := &connForm{mode: formAdd}
 	f.values[fldType] = string(config.Postgres)
+	f.values[fldTLS] = tlsDefaultChoice
 	return f
 }
 
@@ -151,6 +157,10 @@ func editConnForm(conn config.Connection) *connForm {
 	f := &connForm{mode: formEdit, original: conn.Name, base: conn}
 	f.values[fldName] = conn.Name
 	f.values[fldType] = string(conn.Type)
+	f.values[fldTLS] = tlsDefaultChoice
+	if conn.TLS != nil && conn.TLS.Mode != "" {
+		f.values[fldTLS] = string(conn.TLS.Mode)
+	}
 	f.values[fldHost] = conn.Host
 	f.values[fldPort] = itoaOrBlank(conn.Port)
 	f.values[fldUser] = conn.User
@@ -244,6 +254,7 @@ func (f *connForm) connection() (config.Connection, error) {
 	conn.User = f.value(fldUser)
 	conn.Password = f.value(fldPassword)
 	conn.Database = f.value(fldDatabase)
+	conn.TLS = tlsFromField(f.base.TLS, f.value(fldTLS))
 
 	port, err := parsePortField("port", f.value(fldPort))
 	if err != nil {
@@ -664,7 +675,7 @@ func (m *model) formView() string {
 }
 
 // formHints is the key legend at the foot of the form.
-const formHints = "tab/↑↓ field · ←/→ engine · enter save · ctrl+t test · " +
+const formHints = "tab/↑↓ field · ←/→ choose · enter save · ctrl+t test · " +
 	"ctrl+p 1Password · ctrl+k check ref · esc cancel"
 
 // renderValue renders one field's value, masking nothing: the field holds a
@@ -698,4 +709,32 @@ func (f *connForm) passwordNote() string {
 	default:
 		return stWarn.Render("⚠ literal password: it will be stored in plaintext")
 	}
+}
+
+// tlsDefaultChoice is how the form spells "no tls block", so the connection
+// keeps following the per-shape default rather than pinning a mode.
+const tlsDefaultChoice = "default"
+
+// tlsFromField turns the form's TLS choice into a config block. Blank means
+// "no block", so the connection keeps following the default, and the rest of
+// the block — CA, client certificate, server name — survives an edit, since
+// the form does not show those fields.
+func tlsFromField(base *config.TLS, mode string) *config.TLS {
+	if mode == tlsDefaultChoice || mode == "" {
+		if base == nil {
+			return nil
+		}
+		out := *base
+		out.Mode = ""
+		if out == (config.TLS{}) {
+			return nil
+		}
+		return &out
+	}
+	out := config.TLS{}
+	if base != nil {
+		out = *base
+	}
+	out.Mode = config.TLSMode(mode)
+	return &out
 }

@@ -130,7 +130,9 @@ stream. Set the block explicitly to verify the server:
 
 `require` encrypts without checking who is on the other end, so the connection
 list marks such connections as unverified; prefer `verify-full` for anything
-that matters. `ca`, `cert`, and `key` take a file path or an `op://` reference,
+that matters. The mode is also a field in the connection form, so `e` on a
+connection lets you switch it with the arrow keys without editing YAML;
+`default` there means no `tls` block at all. `ca`, `cert`, and `key` take a file path or an `op://` reference,
 and certificate material is never written to disk.
 
 ### Per-engine connectivity
