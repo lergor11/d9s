@@ -29,6 +29,9 @@ const DefaultPageSize = 200
 type Cursor interface {
 	// Columns names the result columns. It is valid before the first page.
 	Columns() []string
+	// ColumnTypes are the engine's type names, positionally matching Columns,
+	// or nil from an engine that does not report them.
+	ColumnTypes() []string
 	// NextPage returns up to n more rows: fewer at the end of the result or at
 	// the cap, and none once Done reports true. A non-positive n asks for
 	// DefaultPageSize. A cursor whose context was cancelled returns that error
@@ -87,6 +90,13 @@ type rowSource interface {
 	affected() int64
 }
 
+// typedSource is a rowSource that knows the engine's column type names. It is
+// optional: a source without it yields a cursor whose ColumnTypes is nil, the
+// same as an engine that does not report types.
+type typedSource interface {
+	columnTypes() []string
+}
+
 // cursor carries the paging, capping and lifetime rules every engine shares,
 // so an adapter only has to supply a rowSource.
 type cursor struct {
@@ -131,6 +141,13 @@ func newRowCursor(columns []string, rows [][]string, affected int64) *cursor {
 }
 
 func (c *cursor) Columns() []string { return c.columns }
+
+func (c *cursor) ColumnTypes() []string {
+	if t, ok := c.src.(typedSource); ok {
+		return t.columnTypes()
+	}
+	return nil
+}
 
 func (c *cursor) NextPage(n int) ([][]string, error) {
 	c.mu.Lock()

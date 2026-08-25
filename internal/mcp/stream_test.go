@@ -21,7 +21,8 @@ type countingCursor struct {
 	closed    bool
 }
 
-func (c *countingCursor) Columns() []string { return []string{"id"} }
+func (c *countingCursor) Columns() []string     { return []string{"id"} }
+func (c *countingCursor) ColumnTypes() []string { return nil }
 
 func (c *countingCursor) NextPage(n int) ([][]string, error) {
 	c.mu.Lock()

@@ -160,7 +160,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case dbOpenResultMsg:
 		return m, m.handleDBOpenResult(msg)
-	case execResultMsg, execDoneMsg:
+	case execResultMsg, execRowsMsg, execDoneMsg:
 		return m, m.handleExecMsg(msg)
 	case historyLoadedMsg:
 		m.handleHistoryLoaded(msg)

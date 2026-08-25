@@ -198,6 +198,16 @@ func (s *chSource) fetch(n int) ([][]string, bool, error) {
 	return out, false, nil
 }
 
+// columnTypes reports the engine's own type names, so a paged result labels
+// its headers the way ClickHouse spells them.
+func (s *chSource) columnTypes() []string {
+	out := make([]string, len(s.types))
+	for i, t := range s.types {
+		out[i] = t.DatabaseTypeName()
+	}
+	return out
+}
+
 func (s *chSource) release() error { return s.rows.Close() }
 
 // affected: ClickHouse reports no row count for the statements that go through

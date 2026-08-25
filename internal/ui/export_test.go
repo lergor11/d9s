@@ -389,7 +389,7 @@ func TestResultSelectionRendering(t *testing.T) {
 
 func TestResultSelectionSurvivesStreaming(t *testing.T) {
 	m := newResultsModel(t, nil)
-	m.query.ch = make(chan db.Result, 1)
+	m.query.ch = make(chan tea.Msg, 1)
 	for _, res := range sampleResults() {
 		m.handleExecMsg(execResultMsg{res: res})
 	}

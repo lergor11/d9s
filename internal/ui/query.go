@@ -23,6 +23,23 @@ const (
 )
 
 type execResultMsg struct{ res db.Result }
+
+// execRowsMsg carries one page of a statement that is still being read, and,
+// on the last one, how the statement ended. Rows arrive in pages so a large
+// result shows its first screen without the whole table being held first.
+type execRowsMsg struct {
+	rows [][]string
+	end  *sectionEnd
+}
+
+// sectionEnd is how a statement finished, known only once its rows are read.
+type sectionEnd struct {
+	err       error
+	affected  int64
+	truncated bool
+	dur       time.Duration
+}
+
 type execDoneMsg struct{}
 
 type queryModel struct {
@@ -38,7 +55,7 @@ type queryModel struct {
 	running      bool
 	cancelled    bool
 	cancel       context.CancelFunc
-	ch           chan db.Result
+	ch           chan tea.Msg
 	results      []db.Result
 	confirm      []string // flagged statements awaiting confirmation; nil = no modal
 	pending      []string // full statement list held while confirming
@@ -357,7 +374,7 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 	q.resSel = 0
 	q.grid.reset()
 	q.renderResults()
-	ch := make(chan db.Result, len(stmts))
+	ch := make(chan tea.Msg, len(stmts)+1)
 	q.ch = ch
 	driver := q.driver
 	connName, dbName, hist := q.connName, q.dbName, m.hist
@@ -368,13 +385,12 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 			if stopped || ctx.Err() != nil {
 				// Skipped statements never reached the engine, so they are
 				// not recorded in the history.
-				ch <- db.Result{Statement: s, Skipped: true, Affected: -1}
+				ch <- execResultMsg{res: db.Result{Statement: s, Skipped: true, Affected: -1}}
 				continue
 			}
-			res := driver.Execute(ctx, s)
-			recordHistory(hist, connName, dbName, s, res.Err == nil, res.Duration)
-			ch <- res
-			if res.Err != nil || ctx.Err() != nil {
+			end := streamStatement(ctx, driver, s, ch)
+			recordHistory(hist, connName, dbName, s, end.err == nil, end.dur)
+			if end.err != nil || ctx.Err() != nil {
 				stopped = true
 			}
 		}
@@ -382,13 +398,55 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 	return tea.Batch(m.spinner.Tick, waitExec(ch))
 }
 
-func waitExec(ch chan db.Result) tea.Cmd {
+// streamStatement runs one statement and feeds its rows to ch a page at a
+// time, so the interface can draw the first rows while the rest are still
+// being read. The cursor is closed before returning: holding one open would
+// pin the connection for as long as the user looks at the result.
+func streamStatement(ctx context.Context, driver db.Driver, stmt string, ch chan<- tea.Msg) sectionEnd {
+	start := time.Now()
+	cur, err := db.Stream(ctx, driver, stmt)
+	if err != nil {
+		end := sectionEnd{err: err, affected: -1, dur: time.Since(start)}
+		ch <- execResultMsg{res: db.Result{Statement: stmt, Err: err, Affected: -1, Duration: end.dur}}
+		return end
+	}
+	defer func() { _ = cur.Close() }()
+
+	ch <- execResultMsg{res: db.Result{
+		Statement:   stmt,
+		Columns:     cur.Columns(),
+		ColumnTypes: cur.ColumnTypes(),
+		Affected:    -1,
+	}}
+
+	var pageErr error
+	for !cur.Done() {
+		rows, err := cur.NextPage(0)
+		if len(rows) > 0 {
+			ch <- execRowsMsg{rows: rows}
+		}
+		if err != nil {
+			pageErr = err
+			break
+		}
+	}
+	end := sectionEnd{
+		err:       pageErr,
+		affected:  cur.Affected(),
+		truncated: cur.Truncated(),
+		dur:       time.Since(start),
+	}
+	ch <- execRowsMsg{end: &end}
+	return end
+}
+
+func waitExec(ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		res, ok := <-ch
+		msg, ok := <-ch
 		if !ok {
 			return execDoneMsg{}
 		}
-		return execResultMsg{res: res}
+		return msg
 	}
 }
 
@@ -401,6 +459,20 @@ func (m *model) handleExecMsg(msg tea.Msg) tea.Cmd {
 			q.resSel = len(q.results) - 1
 		}
 		q.rebuildGrid()
+		q.renderResults()
+		return waitExec(q.ch)
+	case execRowsMsg:
+		if n := len(q.results); n > 0 {
+			cur := &q.results[n-1]
+			cur.Rows = append(cur.Rows, msg.rows...)
+			if msg.end != nil {
+				cur.Err, cur.Affected = msg.end.err, msg.end.affected
+				cur.Truncated, cur.Duration = msg.end.truncated, msg.end.dur
+			}
+			if q.resSel == n-1 {
+				q.rebuildGrid()
+			}
+		}
 		q.renderResults()
 		return waitExec(q.ch)
 	case execDoneMsg:

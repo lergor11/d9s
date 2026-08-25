@@ -33,7 +33,10 @@ type Result struct {
 	Affected    int64 // -1 when not applicable
 	Err         error
 	Skipped     bool // statement not run because a previous one failed / cancelled
-	Duration    time.Duration
+	// Truncated reports that the row cap stopped the read, so the statement
+	// has more rows than Rows holds.
+	Truncated bool
+	Duration  time.Duration
 }
 
 // Target identifies what to connect to: a configured connection plus resolved
