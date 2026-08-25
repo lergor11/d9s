@@ -30,6 +30,12 @@ bastion support and 1Password-backed secrets.
   and keys
 - ClickHouse over the native protocol or HTTP; Redis standalone, Cluster, or
   Sentinel; PostgreSQL over TCP or a unix socket
+- Live progress while a ClickHouse query runs — rows and bytes read, a
+  percentage when the engine knows the total, memory, elapsed time — with the
+  counters preserved on cancel; profile events on demand (`p`) and server log
+  lines under the result. These arrive over the native protocol only: over
+  HTTP (and on engines without a progress stream, like PostgreSQL) the display
+  degrades honestly to elapsed time
 
 ## Install
 
@@ -191,6 +197,7 @@ ClickHouse connection switches protocol and TLS with the arrow keys.
 | `s` / `Ctrl+S` | Schema panel (`Enter` drills into columns, `/` filters, `i` inserts a `SELECT`) |
 | `e` | Export the focused result to a file (CSV or JSON, by extension) |
 | `y` | Copy the focused result to the clipboard as CSV |
+| `p` | Profile events of the focused result (with results focused) |
 | `Tab` | Complete the name at the cursor (in the editor); toggle focus elsewhere |
 | `Ctrl+G` | Reload the cached table and column names used for completion |
 | `Ctrl+J` | Toggle editor/results focus |

@@ -168,6 +168,67 @@ func (d *clickhouseDriver) ExecuteStream(ctx context.Context, statement string) 
 	return newCursor(ctx, rows.Columns(), d.resultCap, src), nil
 }
 
+// ExecuteStreamProgress is ExecuteStream with the engine's progress packets,
+// profile events and server logs fed to sink. These packets exist only on the
+// native protocol: over HTTP the server sends the result alone, so the query
+// runs normally there and the sink stays silent. Log lines are requested at
+// information level, which is where ClickHouse says what it decided to do.
+func (d *clickhouseDriver) ExecuteStreamProgress(ctx context.Context, statement string, sink ProgressSink) (Cursor, error) {
+	t := newProgressTracker(sink)
+	ctx = clickhouse.Context(ctx,
+		clickhouse.WithSettings(clickhouse.Settings{"send_logs_level": "information"}),
+		clickhouse.WithProgress(func(p *clickhouse.Progress) {
+			t.addProgress(p.Rows, p.Bytes, p.TotalRows)
+		}),
+		clickhouse.WithProfileEvents(func(events []clickhouse.ProfileEvent) {
+			for _, e := range events {
+				t.addEvent(e.Name, e.Type == "gauge", e.Value)
+			}
+			t.flush()
+		}),
+		// ProfileInfo describes the result set itself; folded in as gauges so
+		// it shows up beside the profile events rather than needing its own
+		// channel. The names carry the provenance.
+		clickhouse.WithProfileInfo(func(pi *clickhouse.ProfileInfo) {
+			t.addEvent("ProfileInfo.Rows", true, int64(pi.Rows))
+			t.addEvent("ProfileInfo.Bytes", true, int64(pi.Bytes))
+			t.addEvent("ProfileInfo.Blocks", true, int64(pi.Blocks))
+			if pi.AppliedLimit {
+				t.addEvent("ProfileInfo.RowsBeforeLimit", true, int64(pi.RowsBeforeLimit))
+			}
+			t.flush()
+		}),
+		clickhouse.WithLogs(func(l *clickhouse.Log) {
+			sink.Log(LogLine{Level: chLogLevel(l.Priority), Source: l.Source, Text: l.Text})
+		}),
+	)
+	return d.ExecuteStream(ctx, statement)
+}
+
+// chLogLevel names a ClickHouse server log priority.
+func chLogLevel(p int8) string {
+	switch p {
+	case 1:
+		return "fatal"
+	case 2:
+		return "critical"
+	case 3:
+		return "error"
+	case 4:
+		return "warning"
+	case 5:
+		return "notice"
+	case 6:
+		return "information"
+	case 7:
+		return "debug"
+	case 8:
+		return "trace"
+	default:
+		return fmt.Sprintf("level %d", p)
+	}
+}
+
 // chSource pages a ClickHouse result. Each row is scanned into fresh values of
 // the column types, because the driver scans into typed destinations rather
 // than handing back an untyped row.

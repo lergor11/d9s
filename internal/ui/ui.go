@@ -320,7 +320,7 @@ func (m *model) statusView() string {
 	s := m.status
 	if s == "" {
 		if m.query.running && m.view == viewQuery {
-			s = m.spinner.View() + " running... (ctrl+x to cancel)"
+			s = m.spinner.View() + " running" + m.query.progressStatus() + " (ctrl+x to cancel)"
 		} else if m.dbOpening != "" {
 			s = m.spinner.View() + " opening " + m.dbOpening + "..."
 		}
@@ -348,7 +348,7 @@ func (m *model) footerView() string {
 		case m.query.editorFocused():
 			hints = "ctrl+r run · tab complete · ctrl+h history · ctrl+s schema · ctrl+j results · esc back"
 		default:
-			hints = "j/k statement · e export · y copy · s schema · tab editor · esc back · ? help"
+			hints = "j/k statement · e export · y copy · p profile · s schema · tab editor · esc back · ? help"
 		}
 	}
 	return truncate(stFooter.Render(hints), m.width)
@@ -380,6 +380,7 @@ func (m *model) helpView() string {
 		write("s, ctrl+s", "schema panel (tables → enter → columns, i inserts)")
 		write("e", "export focused result to a file (CSV or JSON)")
 		write("y", "copy focused result to the clipboard as CSV")
+		write("p", "profile events of the focused result (when focused)")
 		write("tab", "complete the name at the cursor (ctrl+g reloads names)")
 		write("ctrl+j", "toggle editor/results focus (tab, from results)")
 		write("j/k", "move between statements (when results focused)")

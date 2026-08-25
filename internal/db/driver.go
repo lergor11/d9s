@@ -37,6 +37,15 @@ type Result struct {
 	// has more rows than Rows holds.
 	Truncated bool
 	Duration  time.Duration
+	// Read is the engine's final progress counters for the statement — rows
+	// and bytes read on the server — nil when the engine reported none. For a
+	// cancelled statement it holds what had been read at the cancel.
+	Read *Progress
+	// ProfileEvents are the counters the engine reported for the statement,
+	// in the order each was first seen; nil when it reported none.
+	ProfileEvents []ProfileEvent
+	// Logs are the log lines the server sent with the statement.
+	Logs []LogLine
 }
 
 // Target identifies what to connect to: a configured connection plus resolved

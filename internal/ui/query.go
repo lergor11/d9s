@@ -38,6 +38,9 @@ type sectionEnd struct {
 	affected  int64
 	truncated bool
 	dur       time.Duration
+	read      *db.Progress // what the engine read, nil when it reported nothing
+	events    []db.ProfileEvent
+	logs      []db.LogLine
 }
 
 type execDoneMsg struct{}
@@ -56,9 +59,13 @@ type queryModel struct {
 	cancelled    bool
 	cancel       context.CancelFunc
 	ch           chan tea.Msg
-	results      []db.Result
-	confirm      []string // flagged statements awaiting confirmation; nil = no modal
-	pending      []string // full statement list held while confirming
+	// prog is the live progress of the running statement; the executing
+	// goroutine writes it and the status line reads it on spinner ticks.
+	prog      *runProgress
+	stmtStart time.Time // when the running statement started, for elapsed time
+	results   []db.Result
+	confirm   []string // flagged statements awaiting confirmation; nil = no modal
+	pending   []string // full statement list held while confirming
 
 	resSel     int   // highlighted statement section in the results area
 	resOffsets []int // first rendered line of each statement section
@@ -259,6 +266,11 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 		if q.focusResults {
 			return m.openExportPrompt()
 		}
+	case "p":
+		if q.focusResults {
+			m.openProfile()
+			return nil
+		}
 	case "y":
 		if q.focusResults {
 			return m.copyFocusedResult()
@@ -373,10 +385,13 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 	q.results = nil
 	q.resSel = 0
 	q.grid.reset()
+	q.prog = &runProgress{}
+	q.stmtStart = time.Now()
 	q.renderResults()
 	ch := make(chan tea.Msg, len(stmts)+1)
 	q.ch = ch
 	driver := q.driver
+	prog := q.prog
 	connName, dbName, hist := q.connName, q.dbName, m.hist
 	go func() {
 		defer close(ch)
@@ -388,7 +403,7 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 				ch <- execResultMsg{res: db.Result{Statement: s, Skipped: true, Affected: -1}}
 				continue
 			}
-			end := streamStatement(ctx, driver, s, ch)
+			end := streamStatement(ctx, driver, s, prog, ch)
 			recordHistory(hist, connName, dbName, s, end.err == nil, end.dur)
 			if end.err != nil || ctx.Err() != nil {
 				stopped = true
@@ -402,12 +417,17 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 // time, so the interface can draw the first rows while the rest are still
 // being read. The cursor is closed before returning: holding one open would
 // pin the connection for as long as the user looks at the result.
-func streamStatement(ctx context.Context, driver db.Driver, stmt string, ch chan<- tea.Msg) sectionEnd {
+func streamStatement(ctx context.Context, driver db.Driver, stmt string, prog *runProgress, ch chan<- tea.Msg) sectionEnd {
 	start := time.Now()
-	cur, err := db.Stream(ctx, driver, stmt)
+	cur, err := db.StreamProgress(ctx, driver, stmt, prog)
 	if err != nil {
+		// A failed statement may still have sent logs before the error.
+		read, events, logs := prog.take()
 		end := sectionEnd{err: err, affected: -1, dur: time.Since(start)}
-		ch <- execResultMsg{res: db.Result{Statement: stmt, Err: err, Affected: -1, Duration: end.dur}}
+		ch <- execResultMsg{res: db.Result{
+			Statement: stmt, Err: err, Affected: -1, Duration: end.dur,
+			Read: read, ProfileEvents: events, Logs: logs,
+		}}
 		return end
 	}
 	defer func() { _ = cur.Close() }()
@@ -436,6 +456,7 @@ func streamStatement(ctx context.Context, driver db.Driver, stmt string, ch chan
 		truncated: cur.Truncated(),
 		dur:       time.Since(start),
 	}
+	end.read, end.events, end.logs = prog.take()
 	ch <- execRowsMsg{end: &end}
 	return end
 }
@@ -468,6 +489,8 @@ func (m *model) handleExecMsg(msg tea.Msg) tea.Cmd {
 			if msg.end != nil {
 				cur.Err, cur.Affected = msg.end.err, msg.end.affected
 				cur.Truncated, cur.Duration = msg.end.truncated, msg.end.dur
+				cur.Read, cur.ProfileEvents, cur.Logs = msg.end.read, msg.end.events, msg.end.logs
+				q.stmtStart = time.Now() // the next statement starts now
 			}
 			if q.resSel == n-1 {
 				q.rebuildGrid()
@@ -558,17 +581,27 @@ func (q *queryModel) resultBody(r db.Result, active bool, width int) string {
 	case r.Skipped:
 		return stDim.Render("skipped") + "\n"
 	case r.Err != nil:
+		final := r.Duration.Round(time.Millisecond).String()
+		if note := readNote(r); note != "" {
+			// A cancelled or failed statement still says what had been read.
+			final += " · " + note + " before it stopped"
+		}
 		return stErr.Render(r.Err.Error()) + "\n" +
-			stDim.Render(r.Duration.Round(time.Millisecond).String()) + "\n"
+			stDim.Render(final) + "\n" + renderResultLogs(r, width)
 	case len(r.Columns) > 0:
+		final := fmt.Sprintf("%d row(s) in %s", len(r.Rows), r.Duration.Round(time.Millisecond))
+		if note := readNote(r); note != "" {
+			final += " · " + note
+		}
 		return q.renderGrid(r, active, width) +
-			stDim.Render(fmt.Sprintf("%d row(s) in %s", len(r.Rows), r.Duration.Round(time.Millisecond))) + "\n"
+			stDim.Render(final) + "\n" + renderResultLogs(r, width)
 	default:
 		affected := "OK"
 		if r.Affected >= 0 {
 			affected = fmt.Sprintf("%d row(s) affected", r.Affected)
 		}
-		return affected + " " + stDim.Render("in "+r.Duration.Round(time.Millisecond).String()) + "\n"
+		return affected + " " + stDim.Render("in "+r.Duration.Round(time.Millisecond).String()) + "\n" +
+			renderResultLogs(r, width)
 	}
 }
 

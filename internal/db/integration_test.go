@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -455,6 +456,78 @@ func TestClickHouseLive(t *testing.T) {
 		TLS: plaintext,
 	}})
 	checkClickHouse(t, drv, "d9s_it")
+}
+
+// liveSink collects everything the driver reports, guarded because reports
+// arrive on the goroutine draining the cursor.
+type liveSink struct {
+	mu    sync.Mutex
+	progs []Progress
+	last  []ProfileEvent
+	logs  []LogLine
+}
+
+// Progress appends one running-totals report.
+func (s *liveSink) Progress(p Progress) { s.mu.Lock(); s.progs = append(s.progs, p); s.mu.Unlock() }
+
+// ProfileEvents keeps the latest accumulated set.
+func (s *liveSink) ProfileEvents(e []ProfileEvent) { s.mu.Lock(); s.last = e; s.mu.Unlock() }
+
+// Log appends one server log line.
+func (s *liveSink) Log(l LogLine) { s.mu.Lock(); s.logs = append(s.logs, l); s.mu.Unlock() }
+
+// TestClickHouseProgressLive verifies that a numbers() scan reports climbing
+// progress, a total, and profile events over the native protocol.
+func TestClickHouseProgressLive(t *testing.T) {
+	port := envPort(t, "D9S_IT_CH_PORT")
+	drv := connect(t, Target{Config: config.Connection{
+		Name: "it-ch-progress", Type: config.ClickHouse, Host: "127.0.0.1", Port: port,
+		User: "default", Database: "default",
+		TLS: plaintext,
+	}})
+	ps, ok := drv.(ProgressStreamer)
+	if !ok {
+		t.Fatal("the clickhouse driver does not implement ProgressStreamer")
+	}
+
+	sink := &liveSink{}
+	// max_block_size keeps the scan in many small blocks so several progress
+	// packets arrive even on a fast machine.
+	cur, err := ps.ExecuteStreamProgress(context.Background(),
+		"SELECT max(number) FROM (SELECT number FROM numbers(30000000)) SETTINGS max_block_size = 65536", sink)
+	if err != nil {
+		t.Fatalf("ExecuteStreamProgress: %v", err)
+	}
+	defer func() { _ = cur.Close() }()
+	for !cur.Done() {
+		if _, err := cur.NextPage(0); err != nil {
+			t.Fatalf("NextPage: %v", err)
+		}
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.progs) < 2 {
+		t.Fatalf("got %d progress reports, want them arriving as the scan runs", len(sink.progs))
+	}
+	final := sink.progs[len(sink.progs)-1]
+	if final.Rows < 30000000 {
+		t.Errorf("final rows = %d, want the whole 30M scan counted", final.Rows)
+	}
+	if final.Bytes == 0 {
+		t.Error("final bytes = 0, want bytes read reported")
+	}
+	if final.TotalRows == 0 {
+		t.Error("total rows = 0, want the engine's total for a numbers() scan")
+	}
+	for i := 1; i < len(sink.progs); i++ {
+		if sink.progs[i].Rows < sink.progs[i-1].Rows {
+			t.Fatalf("progress went backwards: %d then %d", sink.progs[i-1].Rows, sink.progs[i].Rows)
+		}
+	}
+	if len(sink.last) == 0 {
+		t.Error("no profile events collected, want SelectedRows and friends")
+	}
 }
 
 // TestClickHouseHTTPLive runs the same checks over the HTTP interface. Bring a
