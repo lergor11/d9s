@@ -44,3 +44,51 @@ func TestFormShowsTLSField(t *testing.T) {
 		t.Errorf("the form does not show a TLS field:\n%s", got)
 	}
 }
+
+func TestProtocolFieldOnlyForClickHouse(t *testing.T) {
+	f := newConnForm()
+	if f.applies(fldProtocol) {
+		t.Error("the protocol field is offered on postgres, where it means nothing")
+	}
+
+	f.values[fldType] = string(config.ClickHouse)
+	if !f.applies(fldProtocol) {
+		t.Error("the protocol field is hidden on clickhouse, where it is the point")
+	}
+
+	// Moving down from Database must land on Protocol here, and skip it on
+	// an engine that has none.
+	f.sel = fldDatabase
+	f.move(1)
+	if f.sel != fldProtocol {
+		t.Errorf("selection = %v, want the protocol field on clickhouse", f.sel)
+	}
+	f.values[fldType] = string(config.Postgres)
+	f.sel = fldDatabase
+	f.move(1)
+	if f.sel != fldTLS {
+		t.Errorf("selection = %v, want the protocol field skipped on postgres", f.sel)
+	}
+}
+
+func TestProtocolSavedOnlyForClickHouse(t *testing.T) {
+	f := editConnForm(config.Connection{Name: "ch", Type: config.ClickHouse, Host: "h"})
+	f.values[fldProtocol] = string(config.ProtocolHTTP)
+	conn, err := f.connection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conn.Protocol != config.ProtocolHTTP {
+		t.Errorf("protocol = %q, want http", conn.Protocol)
+	}
+
+	f2 := editConnForm(config.Connection{Name: "pg", Type: config.Postgres, Host: "h"})
+	f2.values[fldProtocol] = string(config.ProtocolHTTP)
+	conn2, err := f2.connection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conn2.Protocol != "" {
+		t.Errorf("protocol = %q on postgres, want it left unset so the file stays valid", conn2.Protocol)
+	}
+}

@@ -141,8 +141,9 @@ and certificate material is never written to disk.
   - name: ch-http                # ClickHouse behind an HTTP load balancer
     type: clickhouse
     host: ch.internal
-    port: 8123
-    protocol: http               # native (default, 9000) | http
+    protocol: http               # native (default) | http
+    tls:
+      mode: disable              # drop this and it is HTTPS on 8443
 
   - name: redis-cluster
     type: redis
@@ -169,6 +170,13 @@ and certificate material is never written to disk.
 
 Redis Cluster has no logical databases, so a cluster connection lists index 0
 only.
+
+The port follows the protocol and the TLS mode, so it rarely needs saying:
+ClickHouse serves the native protocol on 9000 and 9440 encrypted, and HTTP on
+8123 and 8443 encrypted. Since a direct connection defaults to `require`,
+`protocol: http` alone means HTTPS on 8443; add `tls: {mode: disable}` for a
+plaintext endpoint. Both fields are in the connection form too, so `e` on a
+ClickHouse connection switches protocol and TLS with the arrow keys.
 
 ## Keys
 

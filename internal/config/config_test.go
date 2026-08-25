@@ -178,8 +178,10 @@ connections:
 	if got := ch.EffectiveProtocol(); got != ProtocolHTTP {
 		t.Errorf("clickhouse protocol = %q, want %q", got, ProtocolHTTP)
 	}
-	if got := ch.Port; got != clickHouseHTTPPort {
-		t.Errorf("clickhouse http port = %d, want %d (the http interface, not the native one)", got, clickHouseHTTPPort)
+	// No tls block on a direct connection means require, and ClickHouse serves
+	// encrypted HTTP on its own port.
+	if got := ch.Port; got != clickHouseHTTPSPort {
+		t.Errorf("clickhouse https port = %d, want %d", got, clickHouseHTTPSPort)
 	}
 	if got, want := ch.EffectiveConnectTimeout(), 45*time.Second; got != want {
 		t.Errorf("connect_timeout = %v, want %v", got, want)
@@ -224,8 +226,8 @@ connections:
 	if got := ch.EffectiveProtocol(); got != ProtocolNative {
 		t.Errorf("clickhouse protocol = %q, want %q", got, ProtocolNative)
 	}
-	if got := ch.Port; got != 9000 {
-		t.Errorf("clickhouse default port = %d, want the native 9000", got)
+	if got := ch.Port; got != clickHouseNativeTLSPort {
+		t.Errorf("clickhouse default port = %d, want the encrypted native %d", got, clickHouseNativeTLSPort)
 	}
 	if got := cache.EffectiveRedisMode(); got != RedisStandalone {
 		t.Errorf("redis mode = %q, want %q", got, RedisStandalone)
@@ -551,10 +553,63 @@ func TestSampleIsValid(t *testing.T) {
 	}
 	// The sample doubles as documentation of the connectivity fields, so the
 	// defaults it demonstrates have to be the ones the loader applies.
-	if got := cfg.Connections[1].Port; got != clickHouseHTTPPort {
-		t.Errorf("the http clickhouse sample got port %d, want %d", got, clickHouseHTTPPort)
+	// That sample asks for http and verify-full, which is HTTPS.
+	if got := cfg.Connections[1].Port; got != clickHouseHTTPSPort {
+		t.Errorf("the https clickhouse sample got port %d, want %d", got, clickHouseHTTPSPort)
 	}
 	if got := cfg.Connections[3].EffectiveTLSMode(); got != TLSDisable {
 		t.Errorf("the unix socket sample got tls mode %q, want %q", got, TLSDisable)
+	}
+}
+
+func TestClickHouseDefaultPortFollowsProtocolAndTLS(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{
+			name: "native plaintext",
+			body: "    protocol: native\n    tls:\n      mode: disable\n",
+			want: 9000,
+		},
+		{
+			name: "native encrypted",
+			body: "    protocol: native\n    tls:\n      mode: verify-full\n",
+			want: clickHouseNativeTLSPort,
+		},
+		{
+			name: "http plaintext",
+			body: "    protocol: http\n    tls:\n      mode: disable\n",
+			want: clickHouseHTTPPort,
+		},
+		{
+			name: "https",
+			body: "    protocol: http\n    tls:\n      mode: require\n",
+			want: clickHouseHTTPSPort,
+		},
+		{
+			name: "behind a bastion, where tls defaults to off",
+			body: "    protocol: http\n    ssh:\n      bastion: b\n",
+			want: clickHouseHTTPPort,
+		},
+		{
+			name: "nothing said at all, which means encrypted native",
+			body: "",
+			want: clickHouseNativeTLSPort,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _, err := Load(writeConfig(t,
+				"connections:\n  - name: ch\n    type: clickhouse\n    host: ch.internal\n"+tt.body))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := cfg.Connections[0].Port; got != tt.want {
+				t.Errorf("port = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }

@@ -57,6 +57,7 @@ const (
 	fldUser
 	fldPassword
 	fldDatabase
+	fldProtocol
 	fldTLS
 	fldSSHBastion
 	fldSSHUser
@@ -82,6 +83,9 @@ var formFields = [fieldCount]formField{
 	fldUser:     {label: "User"},
 	fldPassword: {label: "Password", hint: "op://vault/item/field, ${ENV_VAR}, or a literal"},
 	fldDatabase: {label: "Database", hint: "optional"},
+	fldProtocol: {label: "Protocol", choices: []string{
+		string(config.ProtocolNative), string(config.ProtocolHTTP),
+	}, hint: "clickhouse only; the port follows it and the TLS mode"},
 	fldTLS: {label: "TLS", choices: []string{
 		tlsDefaultChoice, string(config.TLSDisable), string(config.TLSRequire),
 		string(config.TLSVerifyCA), string(config.TLSVerifyFull),
@@ -148,6 +152,7 @@ type connEditor struct {
 func newConnForm() *connForm {
 	f := &connForm{mode: formAdd}
 	f.values[fldType] = string(config.Postgres)
+	f.values[fldProtocol] = string(config.ProtocolNative)
 	f.values[fldTLS] = tlsDefaultChoice
 	return f
 }
@@ -157,6 +162,7 @@ func editConnForm(conn config.Connection) *connForm {
 	f := &connForm{mode: formEdit, original: conn.Name, base: conn}
 	f.values[fldName] = conn.Name
 	f.values[fldType] = string(conn.Type)
+	f.values[fldProtocol] = string(conn.EffectiveProtocol())
 	f.values[fldTLS] = tlsDefaultChoice
 	if conn.TLS != nil && conn.TLS.Mode != "" {
 		f.values[fldTLS] = string(conn.TLS.Mode)
@@ -198,14 +204,45 @@ func (f *connForm) value(id formFieldID) string {
 // move walks the selection by delta, stopping at the ends rather than wrapping
 // so holding a key cannot silently cycle past the field being aimed at.
 func (f *connForm) move(delta int) {
-	next := int(f.sel) + delta
-	if next < 0 {
-		next = 0
+	if delta == 0 {
+		return
 	}
-	if next >= int(fieldCount) {
-		next = int(fieldCount) - 1
+	step := 1
+	if delta < 0 {
+		step = -1
 	}
-	f.sel = formFieldID(next)
+	next := int(f.sel)
+	for range abs(delta) {
+		// Skip past whatever the current engine has no use for, rather than
+		// stopping on a field the form will not show.
+		for {
+			next += step
+			if next < 0 || next >= int(fieldCount) {
+				return
+			}
+			if f.applies(formFieldID(next)) {
+				break
+			}
+		}
+		f.sel = formFieldID(next)
+	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// applies reports whether a field means anything for the engine the form is
+// currently set to, so a postgres connection is not asked about a ClickHouse
+// wire protocol.
+func (f *connForm) applies(id formFieldID) bool {
+	if id == fldProtocol {
+		return f.value(fldType) == string(config.ClickHouse)
+	}
+	return true
 }
 
 // cycle steps a choice field through its options.
@@ -255,6 +292,11 @@ func (f *connForm) connection() (config.Connection, error) {
 	conn.Password = f.value(fldPassword)
 	conn.Database = f.value(fldDatabase)
 	conn.TLS = tlsFromField(f.base.TLS, f.value(fldTLS))
+	if conn.Type == config.ClickHouse {
+		conn.Protocol = config.Protocol(f.value(fldProtocol))
+	} else {
+		conn.Protocol = ""
+	}
 
 	port, err := parsePortField("port", f.value(fldPort))
 	if err != nil {
@@ -640,6 +682,9 @@ func (m *model) formView() string {
 	}
 
 	for id := formFieldID(0); id < fieldCount; id++ {
+		if !f.applies(id) {
+			continue
+		}
 		fd := formFields[id]
 		cursor := "  "
 		label := pad(fd.label, width)

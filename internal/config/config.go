@@ -37,6 +37,15 @@ var defaultPorts = map[EngineType]int{
 // the native default when `protocol: http` is selected.
 const clickHouseHTTPPort = 8123
 
+// ClickHouse listens for encrypted traffic on ports of its own: the native
+// protocol on 9440 and HTTPS on 8443, neither of which is the plaintext port
+// plus a convention. A connection that asks for TLS without naming a port
+// means the secure one.
+const (
+	clickHouseNativeTLSPort = 9440
+	clickHouseHTTPSPort     = 8443
+)
+
 // DefaultConnectTimeout bounds the connect and handshake phase of a connection
 // that does not set `connect_timeout`.
 const DefaultConnectTimeout = 10 * time.Second
@@ -362,10 +371,19 @@ func validateTLS(conn *Connection) error {
 // defaultPort returns the port to use when the connection omits one. It is the
 // engine default, except that ClickHouse over HTTP listens elsewhere.
 func defaultPort(conn *Connection) int {
-	if conn.Type == ClickHouse && conn.EffectiveProtocol() == ProtocolHTTP {
-		return clickHouseHTTPPort
+	if conn.Type != ClickHouse {
+		return defaultPorts[conn.Type]
 	}
-	return defaultPorts[conn.Type]
+	secure := conn.EffectiveTLSMode() != TLSDisable
+	switch {
+	case conn.EffectiveProtocol() == ProtocolHTTP && secure:
+		return clickHouseHTTPSPort
+	case conn.EffectiveProtocol() == ProtocolHTTP:
+		return clickHouseHTTPPort
+	case secure:
+		return clickHouseNativeTLSPort
+	}
+	return defaultPorts[ClickHouse]
 }
 
 // validateEngineOptions rejects connectivity fields that the connection's
@@ -466,7 +484,8 @@ const Sample = `connections:
   - name: analytics-ch
     type: clickhouse
     host: ch.internal
-    protocol: http        # native (port 9000) | http (port 8123)
+    protocol: http        # native: 9000, or 9440 with tls
+                          # http:   8123, or 8443 with tls
     user: default
     password: ${CH_PASSWORD}
     connect_timeout: 30s  # default 10s, applies to every engine
