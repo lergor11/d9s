@@ -150,6 +150,45 @@ func (d *clickhouseDriver) Execute(ctx context.Context, statement string) Result
 	return executeViaCursor(ctx, d, statement)
 }
 
+// DescribeTable reports the detail `\d+` shows from the engine's catalog:
+// size and comment from system.tables, the primary key, and the table's
+// data-skipping indices.
+func (d *clickhouseDriver) DescribeTable(ctx context.Context, table string) (TableDetail, error) {
+	var det TableDetail
+	var totalBytes *uint64
+	var comment, primaryKey string
+	err := d.conn.QueryRow(ctx,
+		`SELECT total_bytes, comment, primary_key
+		 FROM system.tables WHERE database = currentDatabase() AND name = ?`, table).
+		Scan(&totalBytes, &comment, &primaryKey)
+	if err != nil {
+		return det, fmt.Errorf("describing %q: %w", table, err)
+	}
+	if totalBytes != nil {
+		det.Size = prettyBytes(*totalBytes)
+	}
+	det.Comment = comment
+	if primaryKey != "" {
+		det.Indexes = append(det.Indexes, IndexDef{Name: "PRIMARY KEY", Definition: primaryKey})
+	}
+	rows, err := d.conn.Query(ctx,
+		`SELECT name, type_full, expr
+		 FROM system.data_skipping_indices
+		 WHERE database = currentDatabase() AND table = ? ORDER BY name`, table)
+	if err != nil {
+		return det, fmt.Errorf("listing the indices of %q: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var name, typeFull, expr string
+		if err := rows.Scan(&name, &typeFull, &expr); err != nil {
+			return det, err
+		}
+		det.Indexes = append(det.Indexes, IndexDef{Name: name, Definition: typeFull + " (" + expr + ")"})
+	}
+	return det, rows.Err()
+}
+
 // ExecuteStream runs a statement and returns a cursor over its rows, leaving
 // the ClickHouse result open until the cursor is closed or ctx is cancelled.
 func (d *clickhouseDriver) ExecuteStream(ctx context.Context, statement string) (Cursor, error) {

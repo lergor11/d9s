@@ -14,6 +14,7 @@ import (
 	"github.com/lergor11/d9s/internal/config"
 	"github.com/lergor11/d9s/internal/db"
 	"github.com/lergor11/d9s/internal/history"
+	"github.com/lergor11/d9s/internal/meta"
 	"github.com/lergor11/d9s/internal/schema"
 )
 
@@ -44,6 +45,9 @@ type sectionEnd struct {
 }
 
 type execDoneMsg struct{}
+
+// execQuitMsg reports that the run hit `\q`, which quits the way psql does.
+type execQuitMsg struct{}
 
 type queryModel struct {
 	ta textarea.Model
@@ -392,6 +396,7 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 	q.ch = ch
 	driver := q.driver
 	prog := q.prog
+	engine := q.engine
 	connName, dbName, hist := q.connName, q.dbName, m.hist
 	go func() {
 		defer close(ch)
@@ -403,7 +408,17 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 				ch <- execResultMsg{res: db.Result{Statement: s, Skipped: true, Affected: -1}}
 				continue
 			}
-			end := streamStatement(ctx, driver, s, prog, ch)
+			var end sectionEnd
+			if meta.Is(s) {
+				var quit bool
+				end, quit = runMetaStatement(ctx, driver, engine, s, ch)
+				if quit {
+					ch <- execQuitMsg{}
+					return
+				}
+			} else {
+				end = streamStatement(ctx, driver, s, prog, ch)
+			}
 			recordHistory(hist, connName, dbName, s, end.err == nil, end.dur)
 			if end.err != nil || ctx.Err() != nil {
 				stopped = true
@@ -411,6 +426,25 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 		}
 	}()
 	return tea.Batch(m.spinner.Tick, waitExec(ch))
+}
+
+// runMetaStatement answers one backslash command off the UI goroutine. The
+// second return reports that the command was `\q`, which the caller turns
+// into quitting.
+func runMetaStatement(ctx context.Context, driver db.Driver, engine config.EngineType, stmt string, ch chan<- tea.Msg) (sectionEnd, bool) {
+	start := time.Now()
+	cmd, err := meta.Parse(stmt)
+	if err != nil {
+		dur := time.Since(start)
+		ch <- execResultMsg{res: db.Result{Statement: stmt, Err: err, Affected: -1, Duration: dur}}
+		return sectionEnd{err: err, affected: -1, dur: dur}, false
+	}
+	if cmd.Verb == "q" {
+		return sectionEnd{affected: -1, dur: time.Since(start)}, true
+	}
+	res := meta.Run(ctx, driver, engine, cmd, stmt)
+	ch <- execResultMsg{res: res}
+	return sectionEnd{err: res.Err, affected: res.Affected, dur: res.Duration}, false
 }
 
 // streamStatement runs one statement and feeds its rows to ch a page at a
@@ -498,6 +532,8 @@ func (m *model) handleExecMsg(msg tea.Msg) tea.Cmd {
 		}
 		q.renderResults()
 		return waitExec(q.ch)
+	case execQuitMsg:
+		return tea.Quit
 	case execDoneMsg:
 		q.running = false
 		if q.cancel != nil {

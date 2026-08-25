@@ -76,6 +76,9 @@ Flags of the listing and query commands:
   clean rows:
     d9s query prod-pg 'SELECT id FROM users LIMIT 5' | jq -r .id
 
+  Statements may be psql-style meta-commands, answered from the catalog:
+    d9s query prod-pg '\dt'       list tables (also \l, \d+ <table>, \? ...)
+
 Exit codes:
 {{.ExitCodes}}
 Configuration:
@@ -100,6 +103,8 @@ Keys (press ? inside d9s for the bindings of the current view):
   ctrl+h         query history   s       schema panel
   e / y          export to file / copy to clipboard
   ? / q          help / quit
+  In the editor, \dt, \d+ <table>, \l and friends answer from the catalog
+  (\? lists them, \q quits).
 
 Try it against throwaway containers:
   docker run -d --rm --name d9s-pg -e POSTGRES_PASSWORD=secret -p 15432:5432 postgres:16-alpine

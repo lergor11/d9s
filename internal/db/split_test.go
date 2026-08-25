@@ -63,6 +63,42 @@ func TestSplit(t *testing.T) {
 			want:   []string{"SELECT 1 -- not; here", "SELECT 2"},
 		},
 		{
+			name:   "meta-command ends at its line",
+			engine: config.Postgres,
+			script: "\\dt\nSELECT 1;",
+			want:   []string{`\dt`, "SELECT 1"},
+		},
+		{
+			name:   "meta-command mixed into a script with semicolons",
+			engine: config.Postgres,
+			script: "\\dt;\nSELECT 1;",
+			want:   []string{`\dt`, "SELECT 1"},
+		},
+		{
+			name:   "meta-command argument keeps its quoting",
+			engine: config.Postgres,
+			script: "\\d+ \"My Table\"\nSELECT 1;",
+			want:   []string{`\d+ "My Table"`, "SELECT 1"},
+		},
+		{
+			name:   "quoted meta argument may hold a semicolon",
+			engine: config.Postgres,
+			script: "\\d \"a;b\"\nSELECT 1;",
+			want:   []string{`\d "a;b"`, "SELECT 1"},
+		},
+		{
+			name:   "backslash inside a statement is not a meta-command",
+			engine: config.Postgres,
+			script: `SELECT 'x' \dt; SELECT 2`,
+			want:   []string{`SELECT 'x' \dt`, "SELECT 2"},
+		},
+		{
+			name:   "meta-command after a finished statement",
+			engine: config.Postgres,
+			script: "SELECT 1;\n\\l",
+			want:   []string{"SELECT 1", `\l`},
+		},
+		{
 			name:   "semicolon inside block comment",
 			engine: config.Postgres,
 			script: "SELECT /* a;b */ 1; SELECT 2",

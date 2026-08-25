@@ -11,6 +11,7 @@ import (
 
 	"github.com/lergor11/d9s/internal/config"
 	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/meta"
 	"github.com/lergor11/d9s/internal/secrets"
 	"github.com/lergor11/d9s/internal/session"
 )
@@ -164,7 +165,21 @@ func runQuery(ctx context.Context, e env, o opts, format Format, pos []string) e
 			e.warn("not run: %s", clip(stmt, statementWidth))
 			continue
 		}
-		res := s.Driver.Execute(ctx, stmt)
+		var res db.Result
+		if meta.Is(stmt) {
+			cmd, perr := meta.Parse(stmt)
+			switch {
+			case perr != nil:
+				res = db.Result{Statement: stmt, Err: perr, Affected: -1}
+			case cmd.Verb == "q":
+				// psql semantics: stop here, successfully, running nothing more.
+				return nil
+			default:
+				res = meta.Run(ctx, s.Driver, conn.Type, cmd, stmt)
+			}
+		} else {
+			res = s.Driver.Execute(ctx, stmt)
+		}
 		if res.Err != nil {
 			e.warn("%s: %s", clip(stmt, statementWidth), res.Err)
 			failures++

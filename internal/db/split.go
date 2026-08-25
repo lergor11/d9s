@@ -310,7 +310,10 @@ func isSpaceByte(c byte) bool {
 }
 
 // splitSQL splits on ';' outside strings, quoted identifiers, and comments.
-// Statements holding no code (empty or comment-only) are dropped.
+// Statements holding no code (empty or comment-only) are dropped. A statement
+// whose first code token is a backslash is a psql-style meta-command: it runs
+// to the end of its line the way psql reads them, with ';' also accepted, and
+// a quoted argument may carry either without ending it.
 func splitSQL(script string, backtick bool) []string {
 	var out []string
 	start, hasCode := 0, false
@@ -319,7 +322,28 @@ func splitSQL(script string, backtick bool) []string {
 			out = append(out, stmt)
 		}
 	}
-	for _, t := range tokenizeSQL(script, backtick) {
+	toks := tokenizeSQL(script, backtick)
+	for ti := 0; ti < len(toks); ti++ {
+		t := toks[ti]
+		if !hasCode && t.Kind == TokenPunct && t.Text == `\` {
+			end := t.End
+			for ti+1 < len(toks) {
+				next := toks[ti+1]
+				if strings.ContainsRune(script[end:next.Start], '\n') {
+					break // the line ended between tokens
+				}
+				if next.Kind == TokenPunct && next.Text == ";" {
+					break
+				}
+				end = next.End
+				ti++
+			}
+			if stmt := strings.TrimSpace(script[t.Start:end]); stmt != "" {
+				out = append(out, stmt)
+			}
+			start, hasCode = end, false
+			continue
+		}
 		switch {
 		case t.Kind == TokenPunct && t.Text == ";":
 			flush(t.Start)

@@ -233,6 +233,29 @@ ClickHouse connection switches protocol and TLS with the arrow keys.
 | `e` | Export the focused result to a file (CSV or JSON, by extension) |
 | `y` | Copy the focused result to the clipboard as CSV |
 | `p` | Profile events of the focused result (with results focused) |
+
+### psql-style meta-commands
+
+The editor understands backslash commands and answers them from the driver's
+catalog instead of sending them to the engine, on every engine:
+
+| Command | Answer |
+|---------|--------|
+| `\l` | Databases |
+| `\dt`, `\d` | Tables (Redis: key prefixes) |
+| `\d <table>` | The table's columns, types, and nullability |
+| `\d+ <table>` | The same plus size, indexes, and comments |
+| `\dn` | Schemas (postgres) |
+| `\du` | Roles |
+| `\df` | Functions |
+| `\?` | This list |
+| `\q` | Quit |
+
+They mix with SQL in one buffer — `\dt` on its own line, then a `SELECT` —
+and each produces a normal result section, so export, copy, sorting and
+filtering work on the answer. A typo like `\dtt` suggests the closest
+command; a verb an engine cannot answer says so, naming the engine. The same
+commands work in scripts: `d9s query prod-pg '\dt'`.
 | `Tab` | Complete the name at the cursor (in the editor); toggle focus elsewhere |
 | `Ctrl+G` | Reload the cached table and column names used for completion |
 | `Ctrl+J` | Toggle editor/results focus |

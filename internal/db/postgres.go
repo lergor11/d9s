@@ -140,6 +140,37 @@ func (d *postgresDriver) Execute(ctx context.Context, statement string) Result {
 	return executeViaCursor(ctx, d, statement)
 }
 
+// DescribeTable reports the detail `\d+` shows: total size, comment, and
+// index definitions. The name goes through regclass, so schema qualification
+// and quoting behave the way the engine's own tools read them.
+func (d *postgresDriver) DescribeTable(ctx context.Context, table string) (TableDetail, error) {
+	var det TableDetail
+	err := d.conn.QueryRow(ctx,
+		`SELECT pg_size_pretty(pg_total_relation_size(c.oid)),
+		        COALESCE(obj_description(c.oid, 'pg_class'), '')
+		 FROM pg_class c WHERE c.oid = $1::regclass`, table).
+		Scan(&det.Size, &det.Comment)
+	if err != nil {
+		return det, fmt.Errorf("describing %q: %w", table, err)
+	}
+	rows, err := d.conn.Query(ctx,
+		`SELECT c.relname, pg_get_indexdef(i.indexrelid)
+		 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+		 WHERE i.indrelid = $1::regclass ORDER BY 1`, table)
+	if err != nil {
+		return det, fmt.Errorf("listing the indexes of %q: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ix IndexDef
+		if err := rows.Scan(&ix.Name, &ix.Definition); err != nil {
+			return det, err
+		}
+		det.Indexes = append(det.Indexes, ix)
+	}
+	return det, rows.Err()
+}
+
 // ExecuteStream runs a statement and returns a cursor over its rows, leaving
 // the pgx result open until the cursor is closed or ctx is cancelled.
 func (d *postgresDriver) ExecuteStream(ctx context.Context, statement string) (Cursor, error) {
