@@ -1,11 +1,60 @@
 package session
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/lergor11/d9s/internal/config"
+	"github.com/lergor11/d9s/internal/db"
+	"github.com/lergor11/d9s/internal/sshtunnel"
 )
+
+// closeRecorder is a Driver that only records Close; Session.Close touches
+// nothing else.
+type closeRecorder struct {
+	db.Driver
+	closed bool
+}
+
+// Close records that the session released the driver.
+func (c *closeRecorder) Close() error { c.closed = true; return nil }
+
+func TestCloseRespectsTunnelOwnership(t *testing.T) {
+	tests := []struct {
+		name string
+		// owned mirrors how OpenTunnel sets it: false for a caller-supplied
+		// tunnel, true for one the session raised itself.
+		owned      bool
+		wantClosed bool
+	}{
+		{name: "a borrowed tunnel stays open for the connection's other sessions", owned: false, wantClosed: false},
+		{name: "an owned tunnel is released", owned: true, wantClosed: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tun := sshtunnel.New(config.SSH{Bastion: "bastion.invalid"})
+			drv := &closeRecorder{}
+			s := &Session{Driver: drv, tunnel: tun, owned: tt.owned}
+			if err := s.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			if !drv.closed {
+				t.Error("Close left the driver open")
+			}
+			// A closed tunnel refuses to dial before any network I/O; the
+			// canceled context stops an open one just as early.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err := tun.Dial(ctx, "tcp", "db:5432")
+			gotClosed := err != nil && strings.Contains(err.Error(), "tunnel is closed")
+			if gotClosed != tt.wantClosed {
+				t.Errorf("tunnel closed = %v, want %v (dial error: %v)", gotClosed, tt.wantClosed, err)
+			}
+		})
+	}
+}
 
 func TestFind(t *testing.T) {
 	cfg := &config.Config{Connections: []config.Connection{

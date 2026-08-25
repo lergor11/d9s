@@ -10,6 +10,7 @@ import (
 	"github.com/lergor11/d9s/internal/config"
 	"github.com/lergor11/d9s/internal/db"
 	"github.com/lergor11/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/session"
 	"github.com/lergor11/d9s/internal/sshtunnel"
 )
 
@@ -48,32 +49,25 @@ func (m *model) updateDatabases(msg tea.KeyMsg) tea.Cmd {
 		name := cs.dbs[m.selDB].Name
 		m.dbOpening = name
 		return tea.Batch(m.spinner.Tick,
-			openDBCmd(m.resolver, cs.cfg, cs.password, cs.tunnel, m.activeConn, name))
+			openDBCmd(m.resolver, cs.cfg, cs.tunnel, m.activeConn, name))
 	}
 	return nil
 }
 
-// openDBCmd connects a fresh driver scoped to the selected database, reusing
-// the already-resolved password and the shared SSH tunnel. The resolver is
-// carried along because TLS certificate material is resolved per connect.
-func openDBCmd(res *secrets.Resolver, conn config.Connection, password string, tun *sshtunnel.Tunnel, idx int, name string) tea.Cmd {
+// openDBCmd opens a fresh session scoped to the selected database through the
+// connection's shared SSH tunnel, which the session borrows rather than owns.
+// The password is re-resolved on each open; the resolver caches it, so only
+// the first resolution of an op:// reference is expensive.
+func openDBCmd(res *secrets.Resolver, conn config.Connection, tun *sshtunnel.Tunnel, idx int, name string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
 
-		drv, err := db.New(conn.Type)
+		s, err := session.OpenTunnel(ctx, res, conn, name, tun)
 		if err != nil {
 			return dbOpenResultMsg{connIdx: idx, dbName: name, err: err}
 		}
-		t := db.Target{Config: conn, Password: password, Database: name, Secrets: res}
-		if tun != nil {
-			t.Dial = tun.Dial
-		}
-		if err := drv.Connect(ctx, t); err != nil {
-			_ = drv.Close()
-			return dbOpenResultMsg{connIdx: idx, dbName: name, err: err}
-		}
-		return dbOpenResultMsg{connIdx: idx, dbName: name, driver: drv}
+		return dbOpenResultMsg{connIdx: idx, dbName: name, driver: s.Driver}
 	}
 }
 

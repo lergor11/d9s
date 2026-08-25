@@ -29,5 +29,7 @@
 - [x] 4.4 `make lint test` green
 
 ## 5. Follow-up
-- [ ] 5.1 Move `internal/ui` onto `internal/session` so the interface and the
+- [x] 5.1 Move `internal/ui` onto `internal/session` so the interface and the
       command line cannot drift apart in how they connect
+      — `session.OpenTunnel` borrows the connection-level tunnel; `Close`
+        releases only a tunnel the session raised itself

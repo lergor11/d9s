@@ -14,6 +14,7 @@ import (
 	"github.com/lergor11/d9s/internal/db"
 	"github.com/lergor11/d9s/internal/export"
 	"github.com/lergor11/d9s/internal/secrets"
+	"github.com/lergor11/d9s/internal/session"
 	"github.com/lergor11/d9s/internal/sshtunnel"
 )
 
@@ -33,18 +34,16 @@ type connState struct {
 	status connStatus
 	errMsg string
 
-	driver   db.Driver // connection-level session (database listing)
-	tunnel   *sshtunnel.Tunnel
-	password string // resolved secret, cached after first successful connect
-	dbs      []db.Database
+	driver db.Driver // connection-level session (database listing)
+	tunnel *sshtunnel.Tunnel
+	dbs    []db.Database
 }
 
 type connResultMsg struct {
-	idx      int
-	driver   db.Driver
-	dbs      []db.Database
-	password string
-	err      error
+	idx    int
+	driver db.Driver
+	dbs    []db.Database
+	err    error
 }
 
 const connectTimeout = 60 * time.Second
@@ -118,35 +117,25 @@ func (m *model) updateConnections(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// connectCmd resolves the password, connects the engine driver and lists the
-// databases, all off the UI goroutine.
+// connectCmd opens the connection-level session and lists the databases, all
+// off the UI goroutine and inside one message, so connecting stays a single
+// round trip for the spinner. The tunnel is borrowed from connState — a failed
+// connect must leave it open for the retry.
 func connectCmd(res *secrets.Resolver, conn config.Connection, tun *sshtunnel.Tunnel, idx int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
 
-		pw, err := res.Resolve(ctx, conn.Password)
+		s, err := session.OpenTunnel(ctx, res, conn, "", tun)
 		if err != nil {
 			return connResultMsg{idx: idx, err: err}
 		}
-		drv, err := db.New(conn.Type)
+		dbs, err := s.Driver.ListDatabases(ctx)
 		if err != nil {
+			_ = s.Close()
 			return connResultMsg{idx: idx, err: err}
 		}
-		t := db.Target{Config: conn, Password: pw, Secrets: res}
-		if tun != nil {
-			t.Dial = tun.Dial
-		}
-		if err := drv.Connect(ctx, t); err != nil {
-			_ = drv.Close()
-			return connResultMsg{idx: idx, err: err}
-		}
-		dbs, err := drv.ListDatabases(ctx)
-		if err != nil {
-			_ = drv.Close()
-			return connResultMsg{idx: idx, err: err}
-		}
-		return connResultMsg{idx: idx, driver: drv, dbs: dbs, password: pw}
+		return connResultMsg{idx: idx, driver: s.Driver, dbs: dbs}
 	}
 }
 
@@ -158,14 +147,15 @@ func (m *model) handleConnResult(msg connResultMsg) {
 	if msg.err != nil {
 		cs.status = statusError
 		cs.errMsg = msg.err.Error()
-		m.status = stErr.Render(fmt.Sprintf("%s: %s", cs.cfg.Name, cs.errMsg))
+		// No connection-name prefix: session.Open already names the connection
+		// where it matters, and the row shows the error beside the name anyway.
+		m.status = stErr.Render(cs.errMsg)
 		return
 	}
 	cs.status = statusConnected
 	cs.errMsg = ""
 	cs.driver = msg.driver
 	cs.dbs = msg.dbs
-	cs.password = msg.password
 	if m.view == viewConnections {
 		m.enterDatabases(msg.idx)
 	}
