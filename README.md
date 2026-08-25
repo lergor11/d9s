@@ -4,6 +4,8 @@ A k9s-style terminal UI for databases. Open-source, terminal-first alternative
 to DataGrip for PostgreSQL, ClickHouse, and Redis — with first-class SSH
 bastion support and 1Password-backed secrets.
 
+![d9s scanning 8 billion rows in ClickHouse: live rows/bytes/percent/memory in the status line, then the engine's profile events](docs/demo.gif)
+
 ## Features (MVP)
 
 - Connection list → database list → query view, fully keyboard-driven
@@ -36,6 +38,39 @@ bastion support and 1Password-backed secrets.
   lines under the result. These arrive over the native protocol only: over
   HTTP (and on engines without a progress stream, like PostgreSQL) the display
   degrades honestly to elapsed time
+
+### What a running query looks like
+
+While a ClickHouse scan runs, the status line counts what the server is
+actually doing, so a heavy query and a stuck one stop looking the same:
+
+```text
+[1] SELECT number % 10 AS k, count() FROM numbers(2000000000) GROUP BY k
+running...
+
+⠸ running 1.24B rows · 9.2 GB · 62% · mem 428 MB · 4.1s (ctrl+x to cancel)
+```
+
+Cancel it and the section keeps the counters instead of pretending nothing
+happened; finish it and `p` opens the engine's own accounting:
+
+```text
+[1] SELECT number % 10 AS k, count() FROM numbers(2000000000) GROUP BY k
+context canceled
+5.0s · read 1.51B rows (11.2 GB) before it stopped
+
+┌ profile · statement 1 ─────────────────┐
+│ SelectedRows              2000000000   │
+│ SelectedBytes            16000000000   │
+│ MemoryTracking             448790528   │
+│ NetworkSendBytes                4096   │
+│ ProfileInfo.Rows                  10   │
+└ ↑/↓ scroll · y copy the raw value ─────┘
+```
+
+The recording at the top of this page is generated with
+[vhs](https://github.com/charmbracelet/vhs): `docs/demo.tape` has the steps
+and prerequisites, and `vhs docs/demo.tape` re-records `docs/demo.gif`.
 
 ## Install
 
