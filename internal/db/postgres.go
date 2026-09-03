@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	sqldriver "database/sql/driver"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -138,6 +139,84 @@ ORDER BY ordinal_position`
 
 func (d *postgresDriver) Execute(ctx context.Context, statement string) Result {
 	return executeViaCursor(ctx, d, statement)
+}
+
+// TransactionState maps PostgreSQL's authoritative ReadyForQuery status for
+// this physical connection. It performs no query and therefore still works
+// after a statement context has been cancelled, provided the session survived.
+func (d *postgresDriver) TransactionState(context.Context) (TransactionState, error) {
+	if d.conn == nil || d.conn.IsClosed() {
+		return TransactionUnknown, errors.New("postgres session is closed; transaction outcome is unknown")
+	}
+	return postgresTransactionState(d.conn.PgConn().TxStatus())
+}
+
+// ControlTransaction applies one explicit operation on the current physical
+// connection and then returns its authoritative protocol state.
+func (d *postgresDriver) ControlTransaction(ctx context.Context, req TransactionRequest) (TransactionState, error) {
+	statement, err := postgresTransactionSQL(req)
+	if err != nil {
+		return TransactionUnknown, err
+	}
+	if d.conn == nil || d.conn.IsClosed() {
+		return TransactionUnknown, errors.New("postgres session is closed; transaction outcome is unknown")
+	}
+	_, execErr := d.conn.Exec(ctx, statement)
+	state, stateErr := d.TransactionState(context.Background())
+	if execErr != nil {
+		if stateErr != nil {
+			return state, fmt.Errorf("%s failed: %w; refreshing transaction state: %v", req.Action, execErr, stateErr)
+		}
+		return state, fmt.Errorf("%s failed: %w", req.Action, execErr)
+	}
+	if stateErr != nil {
+		return state, stateErr
+	}
+	return state, nil
+}
+
+func postgresTransactionState(status byte) (TransactionState, error) {
+	switch status {
+	case 'I':
+		return TransactionIdle, nil
+	case 'T':
+		return TransactionActive, nil
+	case 'E':
+		return TransactionFailed, nil
+	default:
+		return TransactionUnknown, fmt.Errorf("postgres reported unknown transaction status %q", status)
+	}
+}
+
+func postgresTransactionSQL(req TransactionRequest) (string, error) {
+	if err := ValidateTransactionRequest(req); err != nil {
+		return "", err
+	}
+	switch req.Action {
+	case TransactionBegin:
+		return "BEGIN", nil
+	case TransactionCommit:
+		return "COMMIT", nil
+	case TransactionRollback:
+		return "ROLLBACK", nil
+	case TransactionSavepoint:
+		return "SAVEPOINT " + pgx.Identifier{req.Savepoint}.Sanitize(), nil
+	case TransactionRollbackTo:
+		return "ROLLBACK TO SAVEPOINT " + pgx.Identifier{req.Savepoint}.Sanitize(), nil
+	case TransactionRelease:
+		return "RELEASE SAVEPOINT " + pgx.Identifier{req.Savepoint}.Sanitize(), nil
+	default:
+		return "", fmt.Errorf("unknown transaction action %q", req.Action)
+	}
+}
+
+// Plan builds a PostgreSQL-native EXPLAIN statement and streams its text rows.
+func (d *postgresDriver) Plan(ctx context.Context, req PlanRequest) (Cursor, error) {
+	statement, err := planSQL(config.Postgres, req)
+	if err != nil {
+		return nil, err
+	}
+	return d.ExecuteStream(ctx, statement)
 }
 
 // DescribeTable reports the detail `\d+` shows: total size, comment, and

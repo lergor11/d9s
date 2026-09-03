@@ -372,6 +372,59 @@ func TestQueryReadsAFile(t *testing.T) {
 	}
 }
 
+func TestPlanValidatesModeSafetyAndCapabilityBeforeConnecting(t *testing.T) {
+	cfg := writeConfig(t, testConfig)
+	tests := []struct {
+		name    string
+		args    []string
+		want    int
+		wantErr string
+	}{
+		{
+			name: "static is the default", args: []string{"alpha", "SELECT 1"},
+			want: ExitConnect, wantErr: "127.0.0.1:1",
+		},
+		{
+			name: "static plans may inspect mutations", args: []string{"alpha", "DELETE FROM users"},
+			want: ExitConnect, wantErr: "127.0.0.1:1",
+		},
+		{
+			name: "analyze is explicit and accepts a read", args: []string{"alpha", "SELECT 1", "-mode", "analyze"},
+			want: ExitConnect, wantErr: "127.0.0.1:1",
+		},
+		{
+			name: "analyze refuses a mutation", args: []string{"alpha", "DELETE FROM users", "-mode", "analyze"},
+			want: ExitQuery, wantErr: "runtime plan refused",
+		},
+		{
+			name: "wrong engine mode is usage", args: []string{"alpha", "SELECT 1", "-mode", "pipeline"},
+			want: ExitUsage, wantErr: "not supported for postgres",
+		},
+		{
+			name: "a batch is rejected", args: []string{"alpha", "SELECT 1; SELECT 2"},
+			want: ExitUsage, wantErr: "exactly one SQL statement",
+		},
+		{
+			name: "Redis is explicitly unsupported", args: []string{"beta", "GET key"},
+			want: ExitQuery, wantErr: "not supported for redis",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := invoke("plan", append([]string{"-config", cfg}, tt.args...), env{})
+			if got.code != tt.want {
+				t.Fatalf("exit code = %d, want %d (stderr: %s)", got.code, tt.want, got.stderr)
+			}
+			if !strings.Contains(got.stderr, tt.wantErr) {
+				t.Errorf("stderr is missing %q:\n%s", tt.wantErr, got.stderr)
+			}
+			if tt.want != ExitConnect && strings.Contains(got.stderr, "127.0.0.1:1") {
+				t.Errorf("validation contacted the configured endpoint:\n%s", got.stderr)
+			}
+		})
+	}
+}
+
 func TestUnknownCommandIsAUsageError(t *testing.T) {
 	got := invoke("frobnicate", nil, env{})
 	if got.code != ExitUsage {

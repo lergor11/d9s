@@ -96,6 +96,115 @@ func TestPostgresLive(t *testing.T) {
 		t.Errorf("rows = %v, want [[1 two NULL]]", res.Rows)
 	}
 
+	t.Run("query plans", func(t *testing.T) {
+		static := ExecutePlan(ctx, drv, config.Postgres, PlanRequest{
+			Statement: "SELECT * FROM pg_class", Mode: PlanModePlan,
+		})
+		if static.Err != nil {
+			t.Fatalf("static plan: %v", static.Err)
+		}
+		if len(static.Columns) != 1 || len(static.Rows) == 0 {
+			t.Fatalf("static plan columns=%v rows=%v", static.Columns, static.Rows)
+		}
+		if resultContains(static, "Execution Time") {
+			t.Error("static plan contains runtime timing; it appears to have executed the query")
+		}
+
+		runtime := ExecutePlan(ctx, drv, config.Postgres, PlanRequest{
+			Statement: "SELECT count(*) FROM pg_class", Mode: PlanModeAnalyze,
+		})
+		if runtime.Err != nil {
+			t.Fatalf("runtime plan: %v", runtime.Err)
+		}
+		for _, want := range []string{"Execution Time", "Buffers:"} {
+			if !resultContains(runtime, want) {
+				t.Errorf("runtime plan does not contain %q: %v", want, runtime.Rows)
+			}
+		}
+	})
+
+	t.Run("transaction controls", func(t *testing.T) {
+		if _, ok := drv.(TransactionController); !ok {
+			t.Fatal("PostgreSQL driver does not implement TransactionController")
+		}
+		state, err := TransactionStatus(ctx, drv, config.Postgres)
+		if err != nil || state != TransactionIdle {
+			t.Fatalf("initial state = %s, %v", state, err)
+		}
+		// Always try to return the shared integration session to idle if an
+		// assertion below stops the flow early.
+		defer func() {
+			if state, _ := TransactionStatus(context.Background(), drv, config.Postgres); state.Open() {
+				_, _ = RunTransactionAction(context.Background(), drv, config.Postgres,
+					TransactionRequest{Action: TransactionRollback})
+			}
+		}()
+
+		// Ordinary transaction SQL is detected by the same protocol state.
+		if res := drv.Execute(ctx, "BEGIN"); res.Err != nil {
+			t.Fatalf("manual BEGIN: %v", res.Err)
+		}
+		if state, err = TransactionStatus(ctx, drv, config.Postgres); err != nil || state != TransactionActive {
+			t.Fatalf("state after manual BEGIN = %s, %v", state, err)
+		}
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres,
+			TransactionRequest{Action: TransactionRollback}); err != nil || state != TransactionIdle {
+			t.Fatalf("rollback after manual BEGIN = %s, %v", state, err)
+		}
+
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres,
+			TransactionRequest{Action: TransactionBegin}); err != nil || state != TransactionActive {
+			t.Fatalf("begin = %s, %v", state, err)
+		}
+		if res := drv.Execute(ctx, "CREATE TEMP TABLE d9s_tx_it (id int)"); res.Err != nil {
+			t.Fatalf("creating transaction test table: %v", res.Err)
+		}
+		if res := drv.Execute(ctx, "INSERT INTO d9s_tx_it VALUES (1)"); res.Err != nil {
+			t.Fatalf("first insert: %v", res.Err)
+		}
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres, TransactionRequest{
+			Action: TransactionSavepoint, Savepoint: "before second insert",
+		}); err != nil || state != TransactionActive {
+			t.Fatalf("savepoint = %s, %v", state, err)
+		}
+		if res := drv.Execute(ctx, "INSERT INTO d9s_tx_it VALUES (2)"); res.Err != nil {
+			t.Fatalf("second insert: %v", res.Err)
+		}
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres, TransactionRequest{
+			Action: TransactionRollbackTo, Savepoint: "before second insert",
+		}); err != nil || state != TransactionActive {
+			t.Fatalf("rollback-to = %s, %v", state, err)
+		}
+		if count := drv.Execute(ctx, "SELECT count(*) FROM d9s_tx_it"); count.Err != nil ||
+			len(count.Rows) != 1 || count.Rows[0][0] != "1" {
+			t.Fatalf("row count after rollback-to: rows=%v err=%v", count.Rows, count.Err)
+		}
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres, TransactionRequest{
+			Action: TransactionRelease, Savepoint: "before second insert",
+		}); err != nil || state != TransactionActive {
+			t.Fatalf("release = %s, %v", state, err)
+		}
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres,
+			TransactionRequest{Action: TransactionCommit}); err != nil || state != TransactionIdle {
+			t.Fatalf("commit = %s, %v", state, err)
+		}
+
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres,
+			TransactionRequest{Action: TransactionBegin}); err != nil || state != TransactionActive {
+			t.Fatalf("second begin = %s, %v", state, err)
+		}
+		if res := drv.Execute(ctx, "SELECT * FROM d9s_tx_missing"); res.Err == nil {
+			t.Fatal("missing table query succeeded")
+		}
+		if state, err = TransactionStatus(ctx, drv, config.Postgres); err != nil || state != TransactionFailed {
+			t.Fatalf("state after query error = %s, %v", state, err)
+		}
+		if state, err = RunTransactionAction(ctx, drv, config.Postgres,
+			TransactionRequest{Action: TransactionRollback}); err != nil || state != TransactionIdle {
+			t.Fatalf("failed-transaction rollback = %s, %v", state, err)
+		}
+	})
+
 	if res := drv.Execute(ctx, "CREATE TEMP TABLE t (id int)"); res.Err != nil {
 		t.Fatalf("CREATE: %v", res.Err)
 	}
@@ -601,6 +710,33 @@ func checkClickHouse(t *testing.T, drv Driver, table string) {
 	if cols[1].Name != "note" || !cols[1].Nullable {
 		t.Errorf("second column = %+v, want a nullable note", cols[1])
 	}
+
+	t.Run("query plans", func(t *testing.T) {
+		for _, mode := range []PlanMode{PlanModePlan, PlanModePipeline, PlanModeEstimate} {
+			t.Run(string(mode), func(t *testing.T) {
+				res := ExecutePlan(ctx, drv, config.ClickHouse, PlanRequest{
+					Statement: "SELECT * FROM " + table, Mode: mode,
+				})
+				if res.Err != nil {
+					t.Fatalf("%s plan: %v", mode, res.Err)
+				}
+				if len(res.Columns) == 0 {
+					t.Fatalf("%s plan returned no result columns", mode)
+				}
+			})
+		}
+	})
+}
+
+func resultContains(res Result, needle string) bool {
+	for _, row := range res.Rows {
+		for _, cell := range row {
+			if strings.Contains(cell, needle) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func TestRedisLive(t *testing.T) {

@@ -150,6 +150,15 @@ func (d *clickhouseDriver) Execute(ctx context.Context, statement string) Result
 	return executeViaCursor(ctx, d, statement)
 }
 
+// Plan builds a ClickHouse-native EXPLAIN statement and streams its rows.
+func (d *clickhouseDriver) Plan(ctx context.Context, req PlanRequest) (Cursor, error) {
+	statement, err := planSQL(config.ClickHouse, req)
+	if err != nil {
+		return nil, err
+	}
+	return d.ExecuteStream(ctx, statement)
+}
+
 // DescribeTable reports the detail `\d+` shows from the engine's catalog:
 // size and comment from system.tables, the primary key, and the table's
 // data-skipping indices.
@@ -322,7 +331,7 @@ func clickhouseReturnsRows(statement string) bool {
 		return false
 	}
 	switch words[0] {
-	case "SELECT", "SHOW", "DESCRIBE", "DESC", "EXISTS", "WITH":
+	case "SELECT", "SHOW", "DESCRIBE", "DESC", "EXISTS", "WITH", "EXPLAIN":
 		return true
 	}
 	return false

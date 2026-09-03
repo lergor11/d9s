@@ -122,6 +122,17 @@ func TestPostgresCommandsLive(t *testing.T) {
 		}
 	})
 
+	t.Run("query plans", func(t *testing.T) {
+		static := mustRun(t, cfg, "plan", "it-pg", "SELECT * FROM "+table)
+		if !strings.Contains(static.stdout, "QUERY PLAN") {
+			t.Errorf("static plan = %q, want PostgreSQL plan rows", static.stdout)
+		}
+		runtime := mustRun(t, cfg, "plan", "it-pg", "SELECT count(*) FROM "+table, "-mode", "analyze")
+		if !strings.Contains(runtime.stdout, "Execution Time") || !strings.Contains(runtime.stdout, "Buffers:") {
+			t.Errorf("runtime plan = %q, want timing and buffer details", runtime.stdout)
+		}
+	})
+
 	t.Run("query in every format", func(t *testing.T) {
 		const sql = "SELECT 1 AS x, 'two' AS y, NULL AS z"
 		tests := []struct {
@@ -303,7 +314,8 @@ func TestClickHouseCommandsLive(t *testing.T) {
 	const table = "d9s_cli_it_ch"
 	mustRun(t, cfg, "query", "it-ch", "DROP TABLE IF EXISTS "+table, "--write")
 	mustRun(t, cfg, "query", "it-ch",
-		fmt.Sprintf("CREATE TABLE %s (id UInt64, note Nullable(String)) ENGINE = Memory", table))
+		fmt.Sprintf("CREATE TABLE %s (id UInt64, note Nullable(String)) ENGINE = MergeTree ORDER BY id", table))
+	mustRun(t, cfg, "query", "it-ch", fmt.Sprintf("INSERT INTO %s VALUES (1, 'one')", table))
 	t.Cleanup(func() {
 		invoke("query", []string{"-config", cfg, "it-ch", "DROP TABLE IF EXISTS " + table, "--write"}, env{})
 	})
@@ -319,6 +331,14 @@ func TestClickHouseCommandsLive(t *testing.T) {
 	}
 	if got := mustRun(t, cfg, "query", "it-ch", "SELECT 1 AS x"); !strings.Contains(got.stdout, `"x":"1"`) {
 		t.Errorf("query = %q, want one row", got.stdout)
+	}
+	for _, mode := range []string{"plan", "pipeline", "estimate"} {
+		t.Run("plan "+mode, func(t *testing.T) {
+			got := mustRun(t, cfg, "plan", "it-ch", "SELECT * FROM "+table, "-mode", mode)
+			if strings.TrimSpace(got.stdout) == "" {
+				t.Errorf("%s plan returned no output", mode)
+			}
+		})
 	}
 
 	got := invoke("query", []string{"-config", cfg, "it-ch", "SELECT * FROM system.does_not_exist"}, env{})

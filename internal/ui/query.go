@@ -70,6 +70,18 @@ type queryModel struct {
 	results   []db.Result
 	confirm   []string // flagged statements awaiting confirmation; nil = no modal
 	pending   []string // full statement list held while confirming
+	plan      planModel
+
+	// Transaction state belongs to this physical driver session. PostgreSQL
+	// reports it authoritatively; unsupported engines leave txSupported false.
+	txSupported      bool
+	txState          db.TransactionState
+	txErr            string
+	txOutcomeUnknown bool
+	tx               transactionModel
+	txExit           transactionExitModel
+	pendingExit      queryExitIntent
+	savepoints       []string // names created through the explicit controls
 
 	resSel     int   // highlighted statement section in the results area
 	resOffsets []int // first rendered line of each statement section
@@ -135,6 +147,15 @@ func (q *queryModel) open(driver db.Driver, engine config.EngineType, connName, 
 	q.resOffsets = nil
 	q.confirm = nil
 	q.pending = nil
+	q.plan.close()
+	_, q.txSupported = driver.(db.TransactionController)
+	q.txState = db.TransactionUnknown
+	q.txErr = ""
+	q.txOutcomeUnknown = false
+	q.tx.close()
+	q.txExit.close()
+	q.pendingExit = exitNone
+	q.savepoints = nil
 	q.closeExportPrompt()
 	q.running = false
 	q.cancelled = false
@@ -166,20 +187,27 @@ func (q *queryModel) close() {
 		q.driver = nil
 	}
 	q.comp.close()
+	q.plan.close()
+	q.tx.close()
+	q.txExit.close()
+	q.pendingExit = exitNone
+	q.savepoints = nil
 	q.cache = nil
 	q.running = false
 }
 
 func (q *queryModel) editorFocused() bool {
 	return !q.focusResults && q.confirm == nil && !q.histOpen && !q.schema.open &&
-		!q.exportPrompt && !q.saved.open && !q.inspect.open
+		!q.exportPrompt && !q.saved.open && !q.inspect.open && !q.plan.open &&
+		!q.tx.open && !q.txExit.open
 }
 
 // capturesKeys reports whether the query view consumes every key press, which
 // leaves no global single-key shortcut (such as '?') active.
 func (q *queryModel) capturesKeys() bool {
 	return q.editorFocused() || q.confirm != nil || q.histOpen || q.schema.open ||
-		q.exportPrompt || q.saved.open || q.inspect.open || q.grid.filtering
+		q.exportPrompt || q.saved.open || q.inspect.open || q.grid.filtering || q.plan.open ||
+		q.tx.open || q.txExit.open
 }
 
 func (q *queryModel) layout(width, bodyHeight int) {
@@ -205,6 +233,16 @@ func (q *queryModel) layout(width, bodyHeight int) {
 
 func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 	q := &m.query
+
+	if q.txExit.open {
+		return m.updateTransactionExit(msg)
+	}
+	if q.tx.open {
+		return m.updateTransactionControls(msg)
+	}
+	if q.plan.open {
+		return m.updatePlanPicker(msg)
+	}
 
 	// Destructive-statement confirmation modal.
 	if q.confirm != nil {
@@ -254,6 +292,10 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 	// send a bare CR for shift+enter, which the editor must keep as a newline.
 	case "ctrl+r", "f5", "alt+enter":
 		return m.startRunOrConfirm()
+	case "f6":
+		return m.openPlanPicker()
+	case "f7":
+		return m.openTransactionControls()
 	case "ctrl+h":
 		return m.openHistory()
 	case "ctrl+s":
@@ -315,9 +357,7 @@ func (m *model) updateQuery(msg tea.KeyMsg) tea.Cmd {
 			m.status = "query running – ctrl+x to cancel first"
 			return nil
 		}
-		q.close()
-		m.view = viewDatabases
-		return nil
+		return m.requestQueryExit(exitBack)
 	}
 
 	var cmd tea.Cmd
@@ -413,6 +453,7 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 				var quit bool
 				end, quit = runMetaStatement(ctx, driver, engine, s, ch)
 				if quit {
+					sendRunTransactionState(driver, engine, ch)
 					ch <- execQuitMsg{}
 					return
 				}
@@ -420,6 +461,7 @@ func (m *model) startRun(stmts []string) tea.Cmd {
 				end = streamStatement(ctx, driver, s, prog, ch)
 			}
 			recordHistory(hist, connName, dbName, s, end.err == nil, end.dur)
+			sendRunTransactionState(driver, engine, ch)
 			if end.err != nil || ctx.Err() != nil {
 				stopped = true
 			}
@@ -533,7 +575,8 @@ func (m *model) handleExecMsg(msg tea.Msg) tea.Cmd {
 		q.renderResults()
 		return waitExec(q.ch)
 	case execQuitMsg:
-		return tea.Quit
+		q.pendingExit = exitQuit
+		return waitExec(q.ch)
 	case execDoneMsg:
 		q.running = false
 		if q.cancel != nil {
@@ -560,6 +603,9 @@ func (m *model) handleExecMsg(msg tea.Msg) tea.Cmd {
 			m.status = stOK.Render(summary)
 		}
 		q.renderResults()
+		if q.pendingExit != exitNone {
+			return m.finishPendingQueryExit()
+		}
 	}
 	return nil
 }

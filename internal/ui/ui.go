@@ -126,7 +126,8 @@ func (m *model) spinning() bool {
 	if m.editor != nil && m.editor.busy != "" {
 		return true
 	}
-	if m.dbOpening != "" || m.query.running || m.query.schema.inflight {
+	if m.dbOpening != "" || m.query.running || m.query.schema.inflight ||
+		m.query.tx.busy || m.query.txExit.busy {
 		return true
 	}
 	if m.query.cache != nil && m.query.cache.Loading() {
@@ -162,6 +163,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleDBOpenResult(msg)
 	case execResultMsg, execRowsMsg, execDoneMsg, execQuitMsg:
 		return m, m.handleExecMsg(msg)
+	case transactionStateMsg:
+		return m, m.handleTransactionState(msg)
+	case transactionActionMsg:
+		return m, m.handleTransactionAction(msg)
 	case historyLoadedMsg:
 		m.handleHistoryLoaded(msg)
 		return m, nil
@@ -203,6 +208,19 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.quitConfirm {
 		switch key {
 		case "y", "Y":
+			m.quitConfirm = false
+			if m.view == viewQuery && m.query.running && m.query.txSupported {
+				m.query.pendingExit = exitQuit
+				m.query.cancelled = true
+				if m.query.cancel != nil {
+					m.query.cancel()
+				}
+				m.status = "cancelling before transaction exit check..."
+				return m, nil
+			}
+			if m.view == viewQuery && (m.query.txState.Open() || m.query.txOutcomeUnknown) {
+				return m, m.requestQueryExit(exitQuit)
+			}
 			return m, tea.Quit
 		case "n", "N", "esc":
 			m.quitConfirm = false
@@ -214,6 +232,9 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.query.running {
 			m.quitConfirm = true
 			return m, nil
+		}
+		if m.view == viewQuery && (m.query.txState.Open() || m.query.txOutcomeUnknown) {
+			return m, m.requestQueryExit(exitQuit)
 		}
 		return m, tea.Quit
 	}
@@ -271,6 +292,12 @@ func (m *model) View() string {
 		body = m.overlay(m.errDetailView(m.width, m.bodyHeight()))
 	case m.view == viewQuery && m.query.confirm != nil:
 		body = m.overlay(m.query.confirmView(m.width))
+	case m.view == viewQuery && m.query.txExit.open:
+		body = m.overlay(m.query.txExit.view(&m.query))
+	case m.view == viewQuery && m.query.tx.open:
+		body = m.overlay(m.query.tx.view(&m.query, m.width))
+	case m.view == viewQuery && m.query.plan.open:
+		body = m.overlay(m.query.plan.view(m.width))
 	case m.view == viewQuery && m.query.histOpen:
 		body = m.overlay(m.query.historyView(m.width, m.bodyHeight()))
 	case m.view == viewQuery && m.query.schema.open:
@@ -309,6 +336,11 @@ func (m *model) headerView() string {
 	if m.view == viewQuery && m.query.dbName != "" {
 		crumbs = append(crumbs, m.query.dbName)
 	}
+	if m.view == viewQuery {
+		if badge := m.query.transactionBadge(); badge != "" {
+			crumbs = append(crumbs, badge)
+		}
+	}
 	line := title
 	if len(crumbs) > 0 {
 		line += stHeaderDim.Render(" · " + strings.Join(crumbs, " · "))
@@ -337,8 +369,22 @@ func (m *model) footerView() string {
 		hints = "j/k move · enter open · esc back · ? help"
 	case viewQuery:
 		switch {
+		case m.query.txExit.open:
+			hints = "enter apply selected action · j/k choose · esc stay"
+		case m.query.tx.open:
+			if m.query.tx.entering {
+				hints = "type savepoint name · enter apply · ctrl+u clear · esc back"
+			} else {
+				hints = "j/k choose transaction action · enter apply · esc close"
+			}
 		case m.query.exportPrompt:
 			hints = "type a path · enter write · esc cancel"
+		case m.query.plan.open:
+			if m.query.plan.confirm {
+				hints = "y execute runtime plan · n back · esc cancel"
+			} else {
+				hints = "j/k choose mode · enter run plan · esc close"
+			}
 		case m.query.histOpen:
 			hints = "type to filter · j/k select · enter insert · esc close"
 		case m.query.schema.open:
@@ -346,7 +392,7 @@ func (m *model) footerView() string {
 		case m.query.comp.open:
 			hints = completionHints
 		case m.query.editorFocused():
-			hints = "ctrl+r run · tab complete · ctrl+h history · ctrl+s schema · ctrl+j results · esc back"
+			hints = "ctrl+r run · F6 plan · F7 tx · tab complete · ctrl+j results · ctrl+h history · esc back"
 		default:
 			hints = "j/k statement · e export · y copy · p profile · s schema · tab editor · esc back · ? help"
 		}
@@ -374,6 +420,8 @@ func (m *model) helpView() string {
 		write("esc", "back to connections")
 	case viewQuery:
 		write("ctrl+r, F5", "run buffer")
+		write("F6", "show an engine-native query plan (mode picker)")
+		write("F7", "transaction status and explicit controls (PostgreSQL)")
 		write("alt+enter", "run buffer (shift+enter, if your terminal maps it)")
 		write("ctrl+x", "cancel running query")
 		write("ctrl+h", "query history (enter inserts, never runs)")

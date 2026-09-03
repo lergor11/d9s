@@ -39,6 +39,7 @@ var subcommands = map[string]func(args []string) int{
 	"tables":      cli.Tables,
 	"describe":    cli.Describe,
 	"query":       cli.Query,
+	"plan":        cli.Plan,
 	"mcp":         func(args []string) int { return mcp.Main(args, version) },
 }
 
@@ -68,8 +69,9 @@ Flags of the listing and query commands:
   -o format      table, csv, json, or jsonl
                  (default: table on a terminal, jsonl when piped)
   -timeout dur   give up after dur, e.g. 30s (default: no limit)
-  -database name database to use (describe, query)
-  -f file        read the SQL from this file (query)
+  -database name database to use (describe, query, plan)
+  -f file        read the SQL from this file (query, plan)
+  -mode mode     query-plan mode (plan)
   --write        allow destructive statements to run (query)
 
   Data goes to stdout and everything else to stderr, so a pipeline reads
@@ -97,6 +99,7 @@ Configuration:
 Keys (press ? inside d9s for the bindings of the current view):
   j/k, arrows    move            enter   connect / open
   ctrl+r, F5     run buffer      esc     back one level
+  F6             query plan      F7      transaction controls (PostgreSQL)
   alt+enter      run buffer (see the README for shift+enter)
   ctrl+x         cancel query    ctrl+j  toggle editor/results focus
   tab            complete the name at the cursor (ctrl+g reloads names)

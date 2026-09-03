@@ -38,7 +38,7 @@ func TestDispatch(t *testing.T) {
 		{
 			name: "help goes to stdout so it can be paged", command: "help", wantCode: cli.ExitOK,
 			wantStdout: []string{"Usage:", "Commands (each takes -help of its own):",
-				"d9s query <connection> [sql]", "Exit codes:"},
+				"d9s query <connection> [sql]", "d9s plan <connection> [sql]", "Exit codes:"},
 		},
 		{
 			name: "an unknown command lists the real ones", command: "databsaes",

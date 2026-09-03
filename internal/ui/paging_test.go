@@ -118,7 +118,14 @@ func step(t *testing.T, m *model, cmd tea.Cmd, after func()) {
 			m.handleExecMsg(msg)
 			return
 		}
-		cmd = m.handleExecMsg(msg)
+		switch msg := msg.(type) {
+		case transactionStateMsg:
+			cmd = m.handleTransactionState(msg)
+		case transactionActionMsg:
+			cmd = m.handleTransactionAction(msg)
+		default:
+			cmd = m.handleExecMsg(msg)
+		}
 		after()
 	}
 }

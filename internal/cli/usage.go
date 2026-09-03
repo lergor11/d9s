@@ -12,6 +12,7 @@ func Summaries() map[string]string {
 		"tables":      "list the tables of a database",
 		"describe":    "list the columns of a table",
 		"query":       "run SQL from an argument, a file, or stdin",
+		"plan":        "show an engine-native query plan",
 		"mcp":         "serve the connections over MCP, on stdio",
 	}
 }
@@ -23,6 +24,7 @@ var synopsis = map[string]string{
 	"tables":      "d9s tables <connection> [database]",
 	"describe":    "d9s describe <connection> <table>",
 	"query":       "d9s query <connection> [sql]",
+	"plan":        "d9s plan <connection> [sql]",
 	"mcp":         "d9s mcp",
 }
 
@@ -66,6 +68,14 @@ a WHERE, FLUSHALL and friends — are refused unless --write is given,
 because there is no prompt to answer out here. Nothing runs when one is
 refused, not even the harmless statements beside it.
 `,
+	"plan": `Shows one engine-native query plan. PostgreSQL modes are plan (the
+default static EXPLAIN) and analyze (EXPLAIN ANALYZE with buffers). ClickHouse
+modes are plan, pipeline, and estimate. Redis does not support query plans.
+
+PostgreSQL analyze executes the SQL and therefore must be requested explicitly
+with -mode analyze. It is refused unless the statement is classified read-only;
+a server-side read-only role remains the security boundary.
+`,
 }
 
 // commandUsage renders the help of one subcommand: what it takes, the flags it
@@ -84,6 +94,10 @@ func commandUsage(name string) string {
 		b.WriteString("  -database name database to run against\n")
 		b.WriteString("  -f file        read the SQL from this file\n")
 		b.WriteString("  --write        allow destructive statements to run\n")
+	case "plan":
+		b.WriteString("  -database name database to plan against\n")
+		b.WriteString("  -mode mode     plan mode (default: plan)\n")
+		b.WriteString("  -f file        read the SQL from this file\n")
 	}
 	if d := details[name]; d != "" {
 		b.WriteString("\n" + d)

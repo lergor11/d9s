@@ -39,6 +39,10 @@ func key(name string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlT}
 	case "ctrl+u":
 		return tea.KeyMsg{Type: tea.KeyCtrlU}
+	case "f6":
+		return tea.KeyMsg{Type: tea.KeyF6}
+	case "f7":
+		return tea.KeyMsg{Type: tea.KeyF7}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(name)}
 	}

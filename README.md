@@ -16,6 +16,10 @@ bastion support and 1Password-backed secrets.
   the 1Password CLI at connect time — no plaintext secrets on disk
 - Run a single statement or a multi-statement script with per-statement
   results and timings
+- Engine-native query plans (`F6`): PostgreSQL static `EXPLAIN` and explicit
+  `ANALYZE, BUFFERS`; ClickHouse `PLAN`, `PIPELINE`, and `ESTIMATE`
+- Authoritative PostgreSQL transaction status and explicit controls (`F7`):
+  begin, commit, rollback, savepoint, rollback-to, and release
 - Interactive confirmation before destructive statements
   (DROP / TRUNCATE / DELETE without WHERE / FLUSHALL / …)
 - Searchable query history (`Ctrl+H`) persisted to
@@ -227,12 +231,50 @@ ClickHouse connection switches protocol and TLS with the arrow keys.
 | `Enter` | Connect / open |
 | `Esc` | Back |
 | `Ctrl+R` / `F5` / `Alt+Enter` | Run buffer |
-| `Ctrl+X` | Cancel running query |
+| `F6` | Choose and run an engine-native query plan |
+| `F7` | Open PostgreSQL transaction controls |
+| `Ctrl+X` | Cancel running query or plan |
 | `Ctrl+H` | Query history (type to filter, `Enter` inserts without running) |
 | `s` / `Ctrl+S` | Schema panel (`Enter` drills into columns, `/` filters, `i` inserts a `SELECT`) |
 | `e` | Export the focused result to a file (CSV or JSON, by extension) |
 | `y` | Copy the focused result to the clipboard as CSV |
 | `p` | Profile events of the focused result (with results focused) |
+
+### Query plans
+
+Press `F6` with exactly one SQL statement in the editor. PostgreSQL offers a
+static `PLAN` and runtime `ANALYZE`; ClickHouse offers `PLAN`, `PIPELINE`, and
+`ESTIMATE`. Redis reports query plans as unsupported.
+
+The static PostgreSQL plan does not execute the statement. `ANALYZE` does, so
+d9s shows a second confirmation and refuses statements it cannot classify as
+read-only. This classifier is defense in depth, not a proof that a function
+has no side effects: use a server-side read-only role for production access.
+
+Plan rows use the normal result grid, so paging, scrolling, cancellation,
+copy, and export work unchanged. Neither the planned SQL nor its output is
+added to persistent query history automatically.
+
+### Transactions
+
+PostgreSQL sessions continuously show `tx:idle`, `tx:active`, or `tx:failed`
+in the header. This state comes from PostgreSQL's protocol status, so manually
+typed `BEGIN`, `COMMIT`, and `ROLLBACK` are reflected just like actions chosen
+through `F7`. State is refreshed after successful statements, errors, query
+cancellation, and transaction actions.
+
+`F7` offers only actions appropriate to the current state. Savepoint actions
+accept a name and list the names created through the controls; names are sent
+as quoted PostgreSQL identifiers rather than interpolated SQL. A manually
+created savepoint can still be entered by name and PostgreSQL remains the
+authority on whether it exists.
+
+Leaving the database, `Ctrl+C`, or `\q` with an open transaction shows a
+rollback/commit/stay prompt. Rollback is selected by default, failed
+transactions offer rollback or stay, and d9s never commits automatically. If
+the connection is lost, the UI reports the transaction outcome as unknown
+instead of claiming a commit or rollback succeeded. ClickHouse and Redis
+explicitly report these controls as unsupported.
 
 ### psql-style meta-commands
 
@@ -290,6 +332,9 @@ d9s describe prod-pg public.users            # columns of a table
 d9s query prod-pg 'SELECT id FROM users LIMIT 5'
 d9s query prod-pg -f report.sql              # or from a file
 echo 'SELECT 1' | d9s query prod-pg          # or from stdin
+d9s plan prod-pg 'SELECT * FROM users'       # static PostgreSQL EXPLAIN
+d9s plan prod-pg -mode analyze 'SELECT count(*) FROM users'
+d9s plan analytics-ch -mode pipeline 'SELECT * FROM events'
 ```
 
 Output is a table on a terminal and JSONL when piped, so a pipeline reads
@@ -298,6 +343,7 @@ everything else to stderr:
 
 ```sh
 d9s query prod-pg 'SELECT id, email FROM users LIMIT 5' | jq -r .email
+d9s plan prod-pg 'SELECT * FROM users' -o csv > users-plan.csv
 ```
 
 Destructive statements are refused unless `--write` is given, because there is
@@ -306,7 +352,8 @@ success, `2` usage error or unknown connection, `3` database unreachable, `4`
 statement failed, `5` destructive statement refused.
 
 Three more things worth knowing. `-database name` picks the database for
-`describe` and `query`, for connections whose configuration does not name one.
+`describe`, `query`, and `plan`, for connections whose configuration does not
+name one.
 `-timeout 30s` bounds the whole command, on top of the per-connection
 `connect_timeout`. And SQL that begins with a dash needs a `--` ahead of it, so
 the flag parser leaves it alone:
@@ -320,6 +367,12 @@ SELECT month, sum(amount) FROM invoices GROUP BY month'
 
 Flags may come before, between, or after the positional arguments, so
 `d9s query prod-pg 'SELECT 1' -o csv` works as written.
+
+`d9s plan` accepts SQL from its positional argument, `-f`, or stdin and uses
+the same `-o table|csv|json|jsonl` and `-timeout` flags as `query`. Its default
+mode is always the non-executing static plan. PostgreSQL runtime analysis must
+be requested explicitly with `-mode analyze`; ClickHouse accepts `-mode plan`,
+`pipeline`, or `estimate`.
 
 ## Agents: the MCP server
 

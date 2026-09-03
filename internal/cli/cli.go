@@ -59,10 +59,16 @@ func Describe(args []string) int { return run("describe", args, osEnv()) }
 // Query runs SQL taken from an argument, a file, or stdin.
 func Query(args []string) int { return run("query", args, osEnv()) }
 
+// Plan shows an engine-native query plan for SQL from an argument, file, or
+// stdin.
+func Plan(args []string) int { return run("plan", args, osEnv()) }
+
 // Names returns the subcommands this package implements, in the order they
 // should be listed. Commands served from elsewhere, such as the MCP server,
 // are absent from it but still carry a Synopsis and a Summary.
-func Names() []string { return []string{"connections", "databases", "tables", "describe", "query"} }
+func Names() []string {
+	return []string{"connections", "databases", "tables", "describe", "query", "plan"}
+}
 
 // env is the process environment a command reads and writes, injected so the
 // tests can drive a command without a terminal or a real stdout.
@@ -137,6 +143,7 @@ type opts struct {
 	format   string
 	file     string
 	database string
+	mode     string
 	write    bool
 	timeout  time.Duration
 }
@@ -166,12 +173,17 @@ func execute(name string, args []string, e env) error {
 	fs.StringVar(&o.config, "config", config.DefaultPath(), "configuration file")
 	fs.StringVar(&o.format, "o", "", "output format: table, csv, json, or jsonl")
 	fs.DurationVar(&o.timeout, "timeout", 0, "give up after this long (0 = no limit)")
-	if name == "describe" || name == "query" {
+	if name == "describe" || name == "query" || name == "plan" {
 		fs.StringVar(&o.database, "database", "", "database to use (default: the connection's)")
 	}
-	if name == "query" {
+	if name == "query" || name == "plan" {
 		fs.StringVar(&o.file, "f", "", "read the SQL from this file")
+	}
+	if name == "query" {
 		fs.BoolVar(&o.write, "write", false, "allow destructive statements to run")
+	}
+	if name == "plan" {
+		fs.StringVar(&o.mode, "mode", "", "plan mode (default: plan)")
 	}
 	fs.Usage = func() { _, _ = fmt.Fprint(e.stderr, commandUsage(name)) }
 
@@ -202,6 +214,8 @@ func execute(name string, args []string, e env) error {
 		return runDescribe(ctx, e, o, format, pos)
 	case "query":
 		return runQuery(ctx, e, o, format, pos)
+	case "plan":
+		return runPlan(ctx, e, o, format, pos)
 	default:
 		return fail(ExitUsage, "unknown command %q (want %s)", name, strings.Join(Names(), ", "))
 	}

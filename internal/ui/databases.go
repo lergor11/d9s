@@ -86,7 +86,7 @@ func (m *model) handleDBOpenResult(msg dbOpenResultMsg) tea.Cmd {
 	m.query.open(msg.driver, cs.cfg.Type, cs.cfg.Name, msg.dbName)
 	m.query.layout(m.width, m.bodyHeight())
 	m.view = viewQuery
-	return m.query.ta.Focus()
+	return tea.Batch(m.query.ta.Focus(), refreshTransactionCmd(msg.driver, cs.cfg.Type))
 }
 
 func (m *model) databasesView() string {

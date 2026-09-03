@@ -204,6 +204,62 @@ func runQuery(ctx context.Context, e env, o opts, format Format, pos []string) e
 	return nil
 }
 
+func runPlan(ctx context.Context, e env, o opts, format Format, pos []string) error {
+	if err := checkArgs("plan", pos, 1, 2); err != nil {
+		return err
+	}
+	script, err := queryScript(e, o, pos)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(e, o)
+	if err != nil {
+		return err
+	}
+	conn, err := session.Find(cfg, pos[0])
+	if err != nil {
+		return &cmdError{code: ExitUsage, err: err}
+	}
+	stmt, err := db.PlanStatement(conn.Type, script)
+	if err != nil {
+		if errors.Is(err, db.ErrPlanUnsupported) {
+			return &cmdError{code: ExitQuery, err: err}
+		}
+		return &cmdError{code: ExitUsage, err: err}
+	}
+	mode, err := db.ParsePlanMode(conn.Type, o.mode)
+	if err != nil {
+		if errors.Is(err, db.ErrPlanUnsupported) {
+			return &cmdError{code: ExitQuery, err: err}
+		}
+		return &cmdError{code: ExitUsage, err: err}
+	}
+	// Refuse before opening a network session as well as inside db.OpenPlan.
+	// This makes a rejected runtime plan a side-effect-free CLI operation.
+	if mode == db.PlanModeAnalyze {
+		class := db.ClassifyStatement(conn.Type, stmt)
+		if class != db.StatementReadOnly {
+			return &cmdError{code: ExitQuery, err: &db.UnsafeRuntimePlanError{Class: class}}
+		}
+	}
+
+	s, err := connect(ctx, conn, o.database)
+	if err != nil {
+		return err
+	}
+	defer closeSession(e, s)
+
+	res := db.ExecutePlan(ctx, s.Driver, conn.Type, db.PlanRequest{Statement: stmt, Mode: mode})
+	if res.Err != nil {
+		return fail(ExitQuery, "planning %s: %w", clip(stmt, statementWidth), res.Err)
+	}
+	if err := e.write(format, res, ""); err != nil {
+		return err
+	}
+	e.summarize(res)
+	return nil
+}
+
 // queryScript returns the SQL to run: the positional argument, the -f file, or
 // stdin, in that order. Naming more than one source is an error rather than a
 // silent preference, because the caller then does not know which one ran.
